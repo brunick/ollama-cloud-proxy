@@ -3,9 +3,12 @@ services:
     build: .
     ports:
       - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
+    environment:
+      # Der echte Key von ollama.com/settings/api-keys
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY}
+      # Ein selbst gewählter Token, um den Proxy abzusichern
+      # Clients müssen diesen als "Authorization: Bearer <TOKEN>" mitsenden
+      - PROXY_AUTH_TOKEN=${PROXY_AUTH_TOKEN}
     restart: always
 
-volumes:
-  ollama_data:
+# Keine Volumes mehr nötig, da wir nicht mehr die lokale Binary nutzen

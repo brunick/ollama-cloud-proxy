@@ -1,23 +1,25 @@
-FROM debian:bookworm-slim
+FROM python:3.11-slim
 
-# Install dependencies for Ollama and SSL certificates
+WORKDIR /app
+
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     curl \
-    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Ollama
-RUN curl -fsSL https://ollama.com/install.sh | sh
+# Copy requirements and install
+COPY app/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY app/ .
 
 # Set environment variables
 ENV OLLAMA_HOST=0.0.0.0
-ENV OLLAMA_MODELS=/root/.ollama/models
+ENV PORT=11434
 
-# Expose the default Ollama port
+# Expose the proxy port
 EXPOSE 11434
 
-# Create a directory for Ollama configuration and data
-VOLUME ["/root/.ollama"]
-
-# Start Ollama serve
-CMD ["ollama", "serve"]
+# Start the Python proxy
+CMD ["python", "main.py"]
