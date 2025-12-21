@@ -1,6 +1,6 @@
-FROM ubuntu:22.04
+FROM debian:bookworm-slim
 
-# Install dependencies
+# Install dependencies for Ollama and SSL certificates
 RUN apt-get update && apt-get install -y \
     curl \
     ca-certificates \
@@ -17,7 +17,6 @@ ENV OLLAMA_MODELS=/root/.ollama/models
 EXPOSE 11434
 
 # Create a directory for Ollama configuration and data
-# This will be used for persistent storage of authentication and models
 VOLUME ["/root/.ollama"]
 
 # Start Ollama serve
