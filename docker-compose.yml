@@ -2,7 +2,7 @@ services:
   ollama-cloud-proxy:
     build: .
     ports:
-      - "11434:11434"
+      - "11435:11434"
     environment:
       # Der echte Key von ollama.com/settings/api-keys
       - OLLAMA_API_KEY=${OLLAMA_API_KEY}

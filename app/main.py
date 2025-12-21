@@ -39,7 +39,18 @@ async def proxy_ollama(
     await verify_auth(authorization)
 
     # 2. Prepare request to Ollama Cloud
-    url = f"{OLLAMA_CLOUD_URL}/{path}"
+    # Ollama Cloud API base is already https://ollama.com/api
+    # If the incoming request is /api/generate, we need to map it correctly.
+    # If the user calls /generate, it maps to /generate.
+    # If the user calls /api/generate, we strip the /api prefix because OLLAMA_CLOUD_URL already has it.
+
+    clean_path = path
+    if path.startswith("api/"):
+        clean_path = path[4:]
+    elif path == "api":
+        clean_path = ""
+
+    url = f"{OLLAMA_CLOUD_URL}/{clean_path}".rstrip("/")
     method = request.method
     content = await request.body()
     params = request.query_params

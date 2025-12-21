@@ -7,7 +7,7 @@ Dieser Proxy leitet Anfragen an die offizielle Ollama Cloud API (`https://ollama
 - **API-Key Integration**: Nutzt den `OLLAMA_API_KEY` für die Kommunikation mit der Cloud.
 - **Proxy Protection**: Optionaler `PROXY_AUTH_TOKEN`, um unbefugten Zugriff auf deinen Proxy zu verhindern.
 - **Streaming Support**: Unterstützt Streaming-Antworten (z.B. für Chat-Interfaces).
-- **OpenAI Kompatibilität**: Da Ollama Cloud OpenAI-kompatibel ist, fungiert dieser Proxy als lokaler Endpunkt.
+- **OpenAI & Ollama Kompatibilität**: Unterstützt Pfade mit und ohne `/api` Präfix (z.B. `/api/generate` oder `/generate`).
 
 ## Setup
 
@@ -28,12 +28,12 @@ Dieser Proxy leitet Anfragen an die offizielle Ollama Cloud API (`https://ollama
 
 Der Proxy ist unter `http://localhost:11434` erreichbar.
 
-### Beispiel mit Curl
+### Beispiel mit Curl (Ollama Standard)
 
 Wenn ein `PROXY_AUTH_TOKEN` gesetzt ist, muss dieser im Header mitgeschickt werden:
 
 ```bash
-curl http://localhost:11434/generate \
+curl http://localhost:11434/api/generate \
   -H "Authorization: Bearer dein_geheimes_passwort_fuer_lokal" \
   -d '{
     "model": "llama3",
@@ -42,7 +42,21 @@ curl http://localhost:11434/generate \
   }'
 ```
 
+### Beispiel für Chat-Completion (/api/chat)
+
+```bash
+curl http://localhost:11434/api/chat \
+  -H "Authorization: Bearer dein_geheimes_passwort_fuer_lokal" \
+  -d '{
+    "model": "llama3",
+    "messages": [
+      { "role": "user", "content": "Hallo!" }
+    ],
+    "stream": false
+  }'
+```
+
 ### Sicherheit
-- Der Proxy leitet alle Pfade an `https://ollama.com/api` weiter.
+- Der Proxy leitet alle Pfade intelligent an `https://ollama.com/api` weiter (entfernt doppelte `/api` Präfixe automatisch).
 - Anfragen ohne gültigen `PROXY_AUTH_TOKEN` (falls konfiguriert) werden mit `401 Unauthorized` abgelehnt.
 - Es werden keine lokalen Modelle gespeichert; alles läuft über die Cloud-Infrastruktur von Ollama.
