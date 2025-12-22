@@ -43,6 +43,24 @@ async def verify_auth(auth_header: Optional[str]):
         raise HTTPException(status_code=403, detail="Forbidden: Invalid proxy token")
 
 
+@app.get("/")
+async def health_check():
+    """Health check endpoint to verify proxy status and Ollama Cloud connectivity."""
+    status = {"status": "ok", "ollama_cloud": "unknown"}
+    try:
+        async with httpx.AsyncClient() as client:
+            # Check if we can reach Ollama Cloud API
+            response = await client.get(OLLAMA_CLOUD_URL, timeout=5.0)
+            if response.status_code < 500:
+                status["ollama_cloud"] = "reachable"
+            else:
+                status["ollama_cloud"] = "unreachable"
+    except Exception:
+        status["ollama_cloud"] = "error"
+
+    return status
+
+
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
 async def proxy_ollama(
     request: Request, path: str, authorization: Optional[str] = Header(None)
