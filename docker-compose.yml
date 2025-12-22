@@ -2,13 +2,12 @@ services:
   ollama-cloud-proxy:
     build: .
     ports:
-      - "11435:11434"
+      - "11434:11434"
     environment:
       # Der echte Key von ollama.com/settings/api-keys
       - OLLAMA_API_KEY=${OLLAMA_API_KEY}
       # Ein selbst gewählter Token, um den Proxy abzusichern
-      # Clients müssen diesen als "Authorization: Bearer <TOKEN>" mitsenden
-      - PROXY_AUTH_TOKEN=${PROXY_AUTH_TOKEN}
+      - PROXY_AUTH_TOKEN=${PROXY_AUTH_TOKEN:-}
+      # Auf "true" setzen, um die Token-Prüfung zu deaktivieren
+      - ALLOW_UNAUTHENTICATED_ACCESS=${ALLOW_UNAUTHENTICATED_ACCESS:-false}
     restart: always
-
-# Keine Volumes mehr nötig, da wir nicht mehr die lokale Binary nutzen

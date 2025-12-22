@@ -11,6 +11,10 @@ app = FastAPI()
 OLLAMA_CLOUD_URL = "https://ollama.com/api"
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY")
 PROXY_AUTH_TOKEN = os.getenv("PROXY_AUTH_TOKEN")
+# If set to "true", authentication check will be skipped
+ALLOW_UNAUTHENTICATED_ACCESS = (
+    os.getenv("ALLOW_UNAUTHENTICATED_ACCESS", "false").lower() == "true"
+)
 
 if not OLLAMA_API_KEY:
     raise ValueError("OLLAMA_API_KEY environment variable is required")
@@ -18,8 +22,16 @@ if not OLLAMA_API_KEY:
 
 async def verify_auth(auth_header: Optional[str]):
     """Simple security layer to prevent unauthorized access to the proxy."""
-    if not PROXY_AUTH_TOKEN:
+    # Skip check if unauthenticated access is explicitly allowed
+    if ALLOW_UNAUTHENTICATED_ACCESS:
         return
+
+    # If no token is configured, we require one by default unless allowed above
+    if not PROXY_AUTH_TOKEN:
+        raise HTTPException(
+            status_code=500,
+            detail="Server configuration error: PROXY_AUTH_TOKEN is not set",
+        )
 
     if not auth_header or not auth_header.startswith("Bearer "):
         raise HTTPException(
@@ -40,10 +52,6 @@ async def proxy_ollama(
 
     # 2. Prepare request to Ollama Cloud
     # Ollama Cloud API base is already https://ollama.com/api
-    # If the incoming request is /api/generate, we need to map it correctly.
-    # If the user calls /generate, it maps to /generate.
-    # If the user calls /api/generate, we strip the /api prefix because OLLAMA_CLOUD_URL already has it.
-
     clean_path = path
     if path.startswith("api/"):
         clean_path = path[4:]
