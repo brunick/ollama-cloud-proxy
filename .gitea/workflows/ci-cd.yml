@@ -1,0 +1,57 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  release:
+    types: [ "published" ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r app/requirements.txt
+          pip install pytest httpx
+
+      - name: Run simple tests
+        run: |
+          # Einfacher Syntax-Check und Import-Test
+          python -c "import app.main; print('Import successful')"
+
+  build-and-push:
+    needs: test
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Gitea Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: git.n1c.lol
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITEA_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            git.n1c.lol/${{ github.repository }}:latest
+            git.n1c.lol/${{ github.repository }}:${{ github.event.release.tag_name }}
