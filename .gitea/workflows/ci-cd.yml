@@ -26,6 +26,8 @@ jobs:
           pip install pytest httpx
 
       - name: Run simple tests
+        env:
+          OLLAMA_API_KEY: "dummy_key_for_testing"
         run: |
           # Simple syntax check and import test
           python -c "import app.main; print('Import successful')"
