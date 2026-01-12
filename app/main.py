@@ -173,20 +173,17 @@ async def get_stats():
 @app.get("/v1/models")
 async def list_models(authorization: Optional[str] = Header(None)):
     """OpenAI-compatible models endpoint."""
-    await verify_auth(authorization)
-
-    # We proxy this to /api/tags and transform the response
-    # For now, we'll just proxy the raw request to /tags if it's supported,
-    # or return a synthetic response if needed. Ollama Cloud usually
-    # translates /api/tags.
-
-    # Since we need to use the key rotation and proxy logic,
-    # we'll redirect or call the internal proxy_ollama logic.
-    return await proxy_ollama(None, "api/tags", authorization)
+    return await _handle_proxy(None, "api/tags", authorization)
 
 
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
 async def proxy_ollama(
+    request: Request, path: str, authorization: Optional[str] = Header(None)
+):
+    return await _handle_proxy(request, path, authorization)
+
+
+async def _handle_proxy(
     request: Optional[Request], path: str, authorization: Optional[str] = Header(None)
 ):
     # 1. Verify access to this proxy
