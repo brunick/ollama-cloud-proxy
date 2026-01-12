@@ -122,6 +122,7 @@ Beispiel-Antwort:
   {
     "date": "2024-05-22",
     "hour": "14",
+    "client_ip": "192.168.1.50",
     "key_index": 0,
     "model": "llama3:8b",
     "requests": 15,

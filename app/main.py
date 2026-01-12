@@ -22,25 +22,35 @@ def init_db():
             CREATE TABLE IF NOT EXISTS usage (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                client_ip TEXT,
                 key_index INTEGER,
                 model TEXT,
                 prompt_tokens INTEGER,
                 completion_tokens INTEGER
             )
         """)
+        # Simple migration to add client_ip if it doesn't exist
+        try:
+            conn.execute("ALTER TABLE usage ADD COLUMN client_ip TEXT")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
 
 
 init_db()
 
 
 def record_usage(
-    key_index: int, model: str, prompt_tokens: int, completion_tokens: int
+    client_ip: str,
+    key_index: int,
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
 ):
     try:
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
-                "INSERT INTO usage (key_index, model, prompt_tokens, completion_tokens) VALUES (?, ?, ?, ?)",
-                (key_index, model, prompt_tokens, completion_tokens),
+                "INSERT INTO usage (client_ip, key_index, model, prompt_tokens, completion_tokens) VALUES (?, ?, ?, ?, ?)",
+                (client_ip, key_index, model, prompt_tokens, completion_tokens),
             )
     except Exception as e:
         print(f"Error recording usage: {e}")
@@ -144,13 +154,14 @@ async def get_stats():
                 SELECT
                     strftime('%Y-%m-%d', timestamp) as date,
                     strftime('%H', timestamp) as hour,
+                    client_ip,
                     key_index,
                     model,
                     COUNT(*) as requests,
                     SUM(prompt_tokens) as prompt_tokens,
                     SUM(completion_tokens) as completion_tokens
                 FROM usage
-                GROUP BY date, hour, key_index, model
+                GROUP BY date, hour, client_ip, key_index, model
                 ORDER BY date DESC, hour DESC
             """
             rows = conn.execute(query).fetchall()
@@ -182,7 +193,12 @@ async def proxy_ollama(
     global current_key_index
     client = httpx.AsyncClient(timeout=None)
 
-    async def log_stream_usage(response_iter, k_index):
+    # Get client IP, considering potential proxies
+    client_ip = request.headers.get("X-Forwarded-For", request.client.host)
+    if "," in client_ip:
+        client_ip = client_ip.split(",")[0].strip()
+
+    async def log_stream_usage(response_iter, k_index, c_ip):
         last_chunk = b""
         async for chunk in response_iter:
             yield chunk
@@ -195,6 +211,7 @@ async def proxy_ollama(
             data = json.loads(decoded)
             if data.get("done"):
                 record_usage(
+                    c_ip,
                     k_index,
                     data.get("model", "unknown"),
                     data.get("prompt_eval_count", 0),
@@ -231,7 +248,7 @@ async def proxy_ollama(
             # But Ollama is mostly streaming or single JSON.
             # We wrap the iterator to catch the usage data at the end.
             return StreamingResponse(
-                log_stream_usage(response.aiter_raw(), current_key_index),
+                log_stream_usage(response.aiter_raw(), current_key_index, client_ip),
                 status_code=response.status_code,
                 headers=dict(response.headers),
                 background=None,
