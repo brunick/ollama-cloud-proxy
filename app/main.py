@@ -199,26 +199,44 @@ async def proxy_ollama(
         client_ip = client_ip.split(",")[0].strip()
 
     async def log_stream_usage(response_iter, k_index, c_ip):
-        last_chunk = b""
+        # Buffer the tail of the response to ensure we can parse the final JSON
+        # Even if it's split across multiple network chunks.
+        tail_buffer = b""
+        max_tail_size = 4096  # 4KB is plenty for the final stats JSON
+
         async for chunk in response_iter:
             yield chunk
-            last_chunk = chunk  # Keep track of last chunk to find stats
+            tail_buffer = (tail_buffer + chunk)[-max_tail_size:]
 
-        # After stream finishes, try to extract stats from the last chunk(s)
+        # After stream finishes, try to extract stats from the accumulated tail
         try:
-            # Ollama usually sends the final stats in the last line
-            decoded = last_chunk.decode().strip().split("\n")[-1]
-            data = json.loads(decoded)
-            if data.get("done"):
-                record_usage(
-                    c_ip,
-                    k_index,
-                    data.get("model", "unknown"),
-                    data.get("prompt_eval_count", 0),
-                    data.get("eval_count", 0),
-                )
-        except Exception:
-            pass
+            # Ollama sends newline-delimited JSON or a single JSON object.
+            # We look for the last complete JSON object in the tail.
+            decoded_tail = tail_buffer.decode(errors="ignore").strip()
+            lines = decoded_tail.split("\n")
+
+            # Iterate backwards to find the last valid JSON with stats
+            for line in reversed(lines):
+                line = line.strip()
+                if not line or not (line.startswith("{") and line.endswith("}")):
+                    continue
+
+                try:
+                    data = json.loads(line)
+                    # For both streaming (done=True) and non-streaming responses
+                    if data.get("done") or "eval_count" in data:
+                        record_usage(
+                            c_ip,
+                            k_index,
+                            data.get("model", "unknown"),
+                            data.get("prompt_eval_count", 0),
+                            data.get("eval_count", 0),
+                        )
+                        break
+                except json.JSONDecodeError:
+                    continue
+        except Exception as e:
+            print(f"Logging error: {e}")
 
     # 3. Handle Streaming or normal response with retry logic for 429
     for attempt in range(len(OLLAMA_API_KEYS)):
