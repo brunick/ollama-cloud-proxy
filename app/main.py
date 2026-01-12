@@ -1,23 +1,47 @@
 import os
-from typing import Optional
+from typing import List, Optional
 
 import httpx
+import yaml
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 app = FastAPI()
 
-# Configuration from environment variables
+# Configuration
 OLLAMA_CLOUD_URL = "https://ollama.com/api"
-OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY")
 PROXY_AUTH_TOKEN = os.getenv("PROXY_AUTH_TOKEN")
-# If set to "true", authentication check will be skipped
 ALLOW_UNAUTHENTICATED_ACCESS = (
     os.getenv("ALLOW_UNAUTHENTICATED_ACCESS", "false").lower() == "true"
 )
+CONFIG_PATH = os.getenv("CONFIG_PATH", "config/config.yaml")
 
-if not OLLAMA_API_KEY:
-    raise ValueError("OLLAMA_API_KEY environment variable is required")
+
+def load_keys() -> List[str]:
+    keys = []
+    # 1. Try loading from config file
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, "r") as f:
+                config = yaml.safe_load(f)
+                if isinstance(config, dict) and "keys" in config:
+                    keys = [str(k) for k in config["keys"] if k]
+        except Exception as e:
+            print(f"Error loading config file: {e}")
+
+    # 2. Fallback to environment variables
+    if not keys:
+        env_keys = os.getenv("OLLAMA_API_KEYS", os.getenv("OLLAMA_API_KEY", ""))
+        keys = [k.strip() for k in env_keys.split(",") if k.strip()]
+
+    return keys
+
+
+OLLAMA_API_KEYS = load_keys()
+if not OLLAMA_API_KEYS:
+    raise ValueError("No OLLAMA_API_KEYS found in config or environment variables")
+
+current_key_index = 0
 
 
 async def verify_auth(auth_header: Optional[str]):
@@ -81,28 +105,46 @@ async def proxy_ollama(
     content = await request.body()
     params = request.query_params
 
-    # Forward headers but replace Authorization with the real Ollama API Key
-    headers = {
-        "Authorization": f"Bearer {OLLAMA_API_KEY}",
-        "Content-Type": request.headers.get("Content-Type", "application/json"),
-    }
-
+    global current_key_index
     client = httpx.AsyncClient(timeout=None)
 
-    # 3. Handle Streaming or normal response
-    try:
-        req = client.build_request(
-            method, url, content=content, params=params, headers=headers
-        )
-        response = await client.send(req, stream=True)
+    # 3. Handle Streaming or normal response with retry logic for 429
+    for attempt in range(len(OLLAMA_API_KEYS)):
+        current_key = OLLAMA_API_KEYS[current_key_index]
 
-        return StreamingResponse(
-            response.aiter_raw(),
-            status_code=response.status_code,
-            headers=dict(response.headers),
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        headers = {
+            "Authorization": f"Bearer {current_key}",
+            "Content-Type": request.headers.get("Content-Type", "application/json"),
+        }
+
+        try:
+            req = client.build_request(
+                method, url, content=content, params=params, headers=headers
+            )
+            response = await client.send(req, stream=True)
+
+            # If quota exceeded, rotate key and try again
+            if response.status_code == 429 and len(OLLAMA_API_KEYS) > 1:
+                print(
+                    f"Key {current_key_index} exceeded quota (429). Rotating to next key."
+                )
+                await response.aclose()
+                current_key_index = (current_key_index + 1) % len(OLLAMA_API_KEYS)
+                continue
+
+            return StreamingResponse(
+                response.aiter_raw(),
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                background=None,  # Ensure response is closed correctly
+            )
+        except Exception as e:
+            if attempt == len(OLLAMA_API_KEYS) - 1:
+                raise HTTPException(status_code=500, detail=str(e))
+            print(f"Request failed with error: {e}. Retrying with next key.")
+            current_key_index = (current_key_index + 1) % len(OLLAMA_API_KEYS)
+
+    raise HTTPException(status_code=429, detail="All API keys have exceeded quota")
 
 
 if __name__ == "__main__":
