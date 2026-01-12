@@ -1,4 +1,7 @@
+import json
 import os
+import sqlite3
+from datetime import datetime
 from typing import List, Optional
 
 import httpx
@@ -7,6 +10,41 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 app = FastAPI()
+
+# Database setup
+DB_PATH = "data/usage.db"
+os.makedirs("data", exist_ok=True)
+
+
+def init_db():
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                key_index INTEGER,
+                model TEXT,
+                prompt_tokens INTEGER,
+                completion_tokens INTEGER
+            )
+        """)
+
+
+init_db()
+
+
+def record_usage(
+    key_index: int, model: str, prompt_tokens: int, completion_tokens: int
+):
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO usage (key_index, model, prompt_tokens, completion_tokens) VALUES (?, ?, ?, ?)",
+                (key_index, model, prompt_tokens, completion_tokens),
+            )
+    except Exception as e:
+        print(f"Error recording usage: {e}")
+
 
 # Configuration
 OLLAMA_CLOUD_URL = "https://ollama.com/api"
@@ -70,7 +108,7 @@ async def verify_auth(auth_header: Optional[str]):
 @app.get("/")
 async def health_check():
     """Health check endpoint to verify proxy status and Ollama Cloud connectivity."""
-    status = {"status": "ok", "ollama_cloud": "unknown"}
+    status = {"status": "ok", "ollama_cloud": "unknown", "usage_summary": {}}
     try:
         async with httpx.AsyncClient() as client:
             # Check if we can reach Ollama Cloud API
@@ -79,10 +117,46 @@ async def health_check():
                 status["ollama_cloud"] = "reachable"
             else:
                 status["ollama_cloud"] = "unreachable"
+
+        # Add a small summary to health check
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT COUNT(*) as total_req, SUM(prompt_tokens) as p_tokens, SUM(completion_tokens) as c_tokens FROM usage"
+            ).fetchone()
+            if row:
+                status["usage_summary"] = dict(row)
+
     except Exception:
         status["ollama_cloud"] = "error"
 
     return status
+
+
+@app.get("/stats")
+async def get_stats():
+    """Returns hourly aggregated usage statistics."""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            # Aggregate by date, hour, key_index, and model
+            query = """
+                SELECT
+                    strftime('%Y-%m-%d', timestamp) as date,
+                    strftime('%H', timestamp) as hour,
+                    key_index,
+                    model,
+                    COUNT(*) as requests,
+                    SUM(prompt_tokens) as prompt_tokens,
+                    SUM(completion_tokens) as completion_tokens
+                FROM usage
+                GROUP BY date, hour, key_index, model
+                ORDER BY date DESC, hour DESC
+            """
+            rows = conn.execute(query).fetchall()
+            return [dict(row) for row in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving stats: {str(e)}")
 
 
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
@@ -108,6 +182,27 @@ async def proxy_ollama(
     global current_key_index
     client = httpx.AsyncClient(timeout=None)
 
+    async def log_stream_usage(response_iter, k_index):
+        last_chunk = b""
+        async for chunk in response_iter:
+            yield chunk
+            last_chunk = chunk  # Keep track of last chunk to find stats
+
+        # After stream finishes, try to extract stats from the last chunk(s)
+        try:
+            # Ollama usually sends the final stats in the last line
+            decoded = last_chunk.decode().strip().split("\n")[-1]
+            data = json.loads(decoded)
+            if data.get("done"):
+                record_usage(
+                    k_index,
+                    data.get("model", "unknown"),
+                    data.get("prompt_eval_count", 0),
+                    data.get("eval_count", 0),
+                )
+        except Exception:
+            pass
+
     # 3. Handle Streaming or normal response with retry logic for 429
     for attempt in range(len(OLLAMA_API_KEYS)):
         current_key = OLLAMA_API_KEYS[current_key_index]
@@ -132,11 +227,14 @@ async def proxy_ollama(
                 current_key_index = (current_key_index + 1) % len(OLLAMA_API_KEYS)
                 continue
 
+            # If not a stream or if we want to parse it later, we need to handle it.
+            # But Ollama is mostly streaming or single JSON.
+            # We wrap the iterator to catch the usage data at the end.
             return StreamingResponse(
-                response.aiter_raw(),
+                log_stream_usage(response.aiter_raw(), current_key_index),
                 status_code=response.status_code,
                 headers=dict(response.headers),
-                background=None,  # Ensure response is closed correctly
+                background=None,
             )
         except Exception as e:
             if attempt == len(OLLAMA_API_KEYS) - 1:

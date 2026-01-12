@@ -12,4 +12,5 @@ services:
       - ALLOW_UNAUTHENTICATED_ACCESS=${ALLOW_UNAUTHENTICATED_ACCESS:-false}
     volumes:
       - ./config:/app/config
+      - ./data:/app/data
     restart: always

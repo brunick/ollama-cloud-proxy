@@ -5,6 +5,7 @@ Dieser Proxy leitet Anfragen an die offizielle Ollama Cloud API (`https://ollama
 ## Features
 
 - **Multi-Key Rotation**: Unterstützt mehrere API-Keys und wechselt automatisch bei einem `429 Too Many Requests` (Quota exceeded) zum nächsten Key.
+- **Nutzungsstatistik**: Speichert Token-Verbrauch und Modell-Nutzung stündlich in einer SQLite-Datenbank.
 - **API-Key Integration**: Nutzt `OLLAMA_API_KEYS` für die Kommunikation mit der Cloud.
 - **Proxy Protection**: Optionaler `PROXY_AUTH_TOKEN`, um unbefugten Zugriff auf deinen Proxy zu verhindern.
 - **Optionaler Schutz**: Kann über `ALLOW_UNAUTHENTICATED_ACCESS` auch ohne Token betrieben werden.
@@ -79,6 +80,37 @@ curl http://localhost:11434/api/generate \
     "stream": false
   }'
 ```
+
+## Monitoring & Statistiken
+
+Der Proxy trackt automatisch die Nutzung der API-Keys und die verbrauchten Token.
+
+### Nutzungsstatistik abrufen (`/stats`)
+
+Gibt eine stündliche Zusammenfassung nach Key und Modell zurück:
+
+```bash
+curl http://localhost:11434/stats
+```
+
+Beispiel-Antwort:
+```json
+[
+  {
+    "date": "2024-05-22",
+    "hour": "14",
+    "key_index": 0,
+    "model": "llama3:8b",
+    "requests": 15,
+    "prompt_tokens": 1250,
+    "completion_tokens": 4500
+  }
+]
+```
+
+### Health-Check (`/`)
+
+Der `/` Endpunkt liefert neben dem Status auch eine Gesamtsumme der bisherigen Nutzung.
 
 ### Key-Rotation Details
 - Wenn die Ollama Cloud API mit einem Status `429` (Quota exceeded) antwortet, rotiert der Proxy intern zum nächsten verfügbaren Key.
