@@ -172,8 +172,50 @@ async def get_stats():
 
 @app.get("/v1/models")
 async def list_models(authorization: Optional[str] = Header(None)):
-    """OpenAI-compatible models endpoint."""
-    return await _handle_proxy(None, "api/tags", authorization)
+    """OpenAI-compatible models endpoint with response transformation."""
+    response = await _handle_proxy(None, "api/tags", authorization)
+
+    # We need to consume the streaming response to transform it
+    body = b""
+    async for chunk in response.body_iterator:
+        body += chunk
+
+    try:
+        ollama_data = json.loads(body)
+        openai_data = {"object": "list", "data": []}
+
+        for m in ollama_data.get("models", []):
+            # Convert ISO date to unix timestamp
+            created = 0
+            if "modified_at" in m:
+                try:
+                    # Handle both Z and +00:00 formats
+                    date_str = m["modified_at"].replace("Z", "+00:00")
+                    created = int(datetime.fromisoformat(date_str).timestamp())
+                except Exception:
+                    pass
+
+            openai_data["data"].append(
+                {
+                    "id": m.get("name"),
+                    "object": "model",
+                    "created": created,
+                    "owned_by": "ollama",
+                }
+            )
+
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(content=openai_data)
+    except Exception as e:
+        # Fallback to original response if transformation fails
+        from fastapi.responses import Response
+
+        return Response(
+            content=body,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+        )
 
 
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
