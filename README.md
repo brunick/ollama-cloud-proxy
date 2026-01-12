@@ -50,6 +50,29 @@ Dieser Proxy leitet Anfragen an die offizielle Ollama Cloud API (`https://ollama
    docker-compose up -d --build
    ```
 
+### Vollständiges Docker Compose Beispiel
+
+Hier ist ein Beispiel für eine `docker-compose.yml`, die alle neuen Funktionen (Volumes für Config und Statistiken) nutzt:
+
+```yaml
+services:
+  ollama-cloud-proxy:
+    image: git.n1c.lol/nyze.one/ollama-cloud-proxy:latest
+    container_name: ollama-proxy
+    ports:
+      - "11434:11434"
+    environment:
+      # Falls du nur einen Key nutzt (sonst config/config.yaml nutzen):
+      - OLLAMA_API_KEY=dein_ollama_cloud_key
+      # Absicherung des Proxys nach außen:
+      - PROXY_AUTH_TOKEN=mein_geheimer_proxy_token
+      - ALLOW_UNAUTHENTICATED_ACCESS=false
+    volumes:
+      - ./config:/app/config  # Hier liegen deine API-Keys (config.yaml)
+      - ./data:/app/data      # Hier wird die Statistik-DB (usage.db) gespeichert
+    restart: always
+```
+
 ## Nutzung
 
 Der Proxy ist unter `http://localhost:11434` erreichbar.
