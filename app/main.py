@@ -57,7 +57,7 @@ def record_usage(
 
 
 # Configuration
-OLLAMA_CLOUD_URL = "https://ollama.com/api"
+OLLAMA_CLOUD_URL = "https://ollama.com"
 PROXY_AUTH_TOKEN = os.getenv("PROXY_AUTH_TOKEN")
 ALLOW_UNAUTHENTICATED_ACCESS = (
     os.getenv("ALLOW_UNAUTHENTICATED_ACCESS", "false").lower() == "true"
@@ -173,7 +173,7 @@ async def get_stats():
 @app.get("/v1/models")
 async def list_models(authorization: Optional[str] = Header(None)):
     """OpenAI-compatible models endpoint."""
-    return await _handle_proxy(None, "api/tags", authorization)
+    return await _handle_proxy(None, "v1/models", authorization)
 
 
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
@@ -190,20 +190,13 @@ async def _handle_proxy(
     await verify_auth(authorization)
 
     # 2. Prepare request to Ollama Cloud
-    # Ollama Cloud API base is already https://ollama.com/api
+    # Ollama Cloud API base is https://ollama.com
     clean_path = path
-
-    # Handle OpenAI compatible paths
-    if path.startswith("v1/chat/completions"):
-        clean_path = "chat"
-    elif path.startswith("v1/completions"):
-        clean_path = "generate"
-    elif path.startswith("v1/models"):
-        clean_path = "tags"
-    elif path.startswith("api/"):
-        clean_path = path[4:]
-    elif path == "api":
-        clean_path = ""
+    if not (path.startswith("v1/") or path.startswith("api/")):
+        if path == "api" or path == "":
+            clean_path = "api"
+        else:
+            clean_path = f"api/{path}"
 
     url = f"{OLLAMA_CLOUD_URL}/{clean_path}".rstrip("/")
     method = request.method if request else "GET"
