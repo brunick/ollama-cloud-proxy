@@ -7,9 +7,12 @@ from typing import List, Optional
 import httpx
 import yaml
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 app = FastAPI()
+
+# Store latest rate limit headers per key index
+rate_limit_store = {}
 
 # Database setup
 DB_PATH = "data/usage.db"
@@ -170,6 +173,13 @@ async def get_stats():
         raise HTTPException(status_code=500, detail=f"Error retrieving stats: {str(e)}")
 
 
+@app.get("/ratelimits")
+async def get_ratelimits(authorization: Optional[str] = Header(None)):
+    """Returns the latest captured rate limit headers for all keys."""
+    await verify_auth(authorization)
+    return rate_limit_store
+
+
 @app.get("/v1/models")
 async def list_models(authorization: Optional[str] = Header(None)):
     """OpenAI-compatible models endpoint."""
@@ -280,6 +290,15 @@ async def _handle_proxy(
                 await response.aclose()
                 current_key_index = (current_key_index + 1) % len(OLLAMA_API_KEYS)
                 continue
+
+            # Capture rate limit headers
+            rl_headers = {
+                k.lower(): v
+                for k, v in response.headers.items()
+                if k.lower().startswith("x-ratelimit-")
+            }
+            if rl_headers:
+                rate_limit_store[f"key_{current_key_index}"] = rl_headers
 
             # If not a stream or if we want to parse it later, we need to handle it.
             # But Ollama is mostly streaming or single JSON.
