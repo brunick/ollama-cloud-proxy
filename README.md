@@ -4,7 +4,8 @@ Dieser Proxy leitet Anfragen an die offizielle Ollama Cloud API (`https://ollama
 
 ## Features
 
-- **API-Key Integration**: Nutzt den `OLLAMA_API_KEY` für die Kommunikation mit der Cloud.
+- **Multi-Key Rotation**: Unterstützt mehrere API-Keys und wechselt automatisch bei einem `429 Too Many Requests` (Quota exceeded) zum nächsten Key.
+- **API-Key Integration**: Nutzt `OLLAMA_API_KEYS` für die Kommunikation mit der Cloud.
 - **Proxy Protection**: Optionaler `PROXY_AUTH_TOKEN`, um unbefugten Zugriff auf deinen Proxy zu verhindern.
 - **Optionaler Schutz**: Kann über `ALLOW_UNAUTHENTICATED_ACCESS` auch ohne Token betrieben werden.
 - **Streaming Support**: Unterstützt Streaming-Antworten (z.B. für Chat-Interfaces).
@@ -13,10 +14,27 @@ Dieser Proxy leitet Anfragen an die offizielle Ollama Cloud API (`https://ollama
 ## Setup
 
 1. **Konfiguration**:
-   Erstelle eine `.env` Datei im Stammverzeichnis oder setze die Umgebungsvariablen direkt:
+   Erstelle eine `.env` Datei im Stammverzeichnis oder setze die Umgebungsvariablen direkt.
+
+   ### Mehrere API-Keys (Rotation)
+   Du kannst mehrere Keys über eine Konfigurationsdatei oder eine Umgebungsvariable angeben:
+
+   **Option A: `config/config.yaml` (Empfohlen)**
+   Erstelle die Datei im Projektordner:
+   ```yaml
+   keys:
+     - "key_1"
+     - "key_2"
+     - "key_3"
+   ```
+
+   **Option B: Umgebungsvariable**
    ```env
-   OLLAMA_API_KEY=dein_ollama_cloud_api_key
-   
+   OLLAMA_API_KEYS=key1,key2,key3
+   ```
+
+   ### Weitere Optionen
+   ```env
    # Option A: Abgesichert (empfohlen)
    PROXY_AUTH_TOKEN=ein_geheimes_passwort_fuer_lokal
    ALLOW_UNAUTHENTICATED_ACCESS=false
@@ -61,6 +79,11 @@ curl http://localhost:11434/api/generate \
     "stream": false
   }'
 ```
+
+### Key-Rotation Details
+- Wenn die Ollama Cloud API mit einem Status `429` (Quota exceeded) antwortet, rotiert der Proxy intern zum nächsten verfügbaren Key.
+- Die ursprüngliche Anfrage wird automatisch mit dem neuen Key wiederholt.
+- Der aktuell gewählte Key bleibt für nachfolgende Anfragen aktiv, bis auch dieser sein Limit erreicht.
 
 ### Sicherheit
 - Der Proxy leitet alle Pfade intelligent an `https://ollama.com/api` weiter (entfernt doppelte `/api` Präfixe automatisch).
