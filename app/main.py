@@ -170,9 +170,21 @@ async def get_stats():
         raise HTTPException(status_code=500, detail=f"Error retrieving stats: {str(e)}")
 
 
+@app.get("/v1/models")
+async def list_models(authorization: Optional[str] = Header(None)):
+    """OpenAI-compatible models endpoint."""
+    return await _handle_proxy(None, "api/tags", authorization)
+
+
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
 async def proxy_ollama(
     request: Request, path: str, authorization: Optional[str] = Header(None)
+):
+    return await _handle_proxy(request, path, authorization)
+
+
+async def _handle_proxy(
+    request: Optional[Request], path: str, authorization: Optional[str] = Header(None)
 ):
     # 1. Verify access to this proxy
     await verify_auth(authorization)
@@ -180,21 +192,33 @@ async def proxy_ollama(
     # 2. Prepare request to Ollama Cloud
     # Ollama Cloud API base is already https://ollama.com/api
     clean_path = path
-    if path.startswith("api/"):
+
+    # Handle OpenAI compatible paths
+    if path.startswith("v1/chat/completions"):
+        clean_path = "chat"
+    elif path.startswith("v1/completions"):
+        clean_path = "generate"
+    elif path.startswith("v1/models"):
+        clean_path = "tags"
+    elif path.startswith("api/"):
         clean_path = path[4:]
     elif path == "api":
         clean_path = ""
 
     url = f"{OLLAMA_CLOUD_URL}/{clean_path}".rstrip("/")
-    method = request.method
-    content = await request.body()
-    params = request.query_params
+    method = request.method if request else "GET"
+    content = await request.body() if request else None
+    params = request.query_params if request else None
 
     global current_key_index
     client = httpx.AsyncClient(timeout=None)
 
     # Get client IP, considering potential proxies
-    client_ip = request.headers.get("X-Forwarded-For", request.client.host)
+    if request:
+        client_ip = request.headers.get("X-Forwarded-For", request.client.host)
+    else:
+        client_ip = "127.0.0.1"
+
     if "," in client_ip:
         client_ip = client_ip.split(",")[0].strip()
 
@@ -244,7 +268,9 @@ async def proxy_ollama(
 
         headers = {
             "Authorization": f"Bearer {current_key}",
-            "Content-Type": request.headers.get("Content-Type", "application/json"),
+            "Content-Type": request.headers.get("Content-Type", "application/json")
+            if request
+            else "application/json",
         }
 
         try:
