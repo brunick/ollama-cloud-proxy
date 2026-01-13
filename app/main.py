@@ -81,17 +81,17 @@ def record_usage(
         print(f"Error recording usage: {e}")
 
 
-def store_request_file(client_ip: str, model: str, request_body: bytes) -> str:
-    """Store the raw request body compressed as gzip.
+def store_request_file(client_ip: str, request_body: bytes) -> str:
+    """Store the raw request body compressed as gzip immediately.
 
     Directory hierarchy:
-        data/requests/<client_ip>/<YYYY-MM-DD>/<model>/...
+        data/requests/<client_ip>/<YYYY-MM-DD>/...
 
     Returns the relative file path for DB storage.
     """
     safe_ip = client_ip.replace(":", "_")
     date_str = datetime.utcnow().strftime("%Y-%m-%d")
-    base_dir = os.path.join("data", "requests", safe_ip, date_str, model)
+    base_dir = os.path.join("data", "requests", safe_ip, date_str)
     os.makedirs(base_dir, exist_ok=True)
     filename = (
         datetime.utcnow().strftime("%Y%m%dT%H%M%S") + f"_{uuid.uuid4().hex}.json.gz"
@@ -105,42 +105,52 @@ def store_request_file(client_ip: str, model: str, request_body: bytes) -> str:
     return file_path
 
 
-def record_request(
+def create_request_log(
     client_ip: str,
     method: str,
     endpoint: str,
-    model: str,
-    prompt_tokens: int,
-    completion_tokens: int,
     file_path: str,
-):
-    """Persist request metadata and link to the stored request body."""
+) -> Optional[int]:
+    """Create an initial request log entry and return its ID."""
     try:
         with sqlite3.connect(DB_PATH) as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """
                 INSERT INTO requests (
                     client_ip,
                     method,
                     endpoint,
-                    model,
-                    prompt_tokens,
-                    completion_tokens,
-                    file_path
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    client_ip,
-                    method,
-                    endpoint,
-                    model,
-                    prompt_tokens,
-                    completion_tokens,
                     file_path,
-                ),
+                    model
+                ) VALUES (?, ?, ?, ?, 'pending')
+                """,
+                (client_ip, method, endpoint, file_path),
+            )
+            return cursor.lastrowid
+    except Exception as e:
+        print(f"Error creating request log: {e}")
+        return None
+
+
+def update_request_log(
+    request_id: int,
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+):
+    """Update a request log entry with token counts and actual model."""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                """
+                UPDATE requests
+                SET model = ?, prompt_tokens = ?, completion_tokens = ?
+                WHERE id = ?
+                """,
+                (model, prompt_tokens, completion_tokens, request_id),
             )
     except Exception as e:
-        print(f"Error recording request: {e}")
+        print(f"Error updating request log: {e}")
 
 
 # Configuration
@@ -309,9 +319,13 @@ async def _handle_proxy(
     if "," in client_ip:
         client_ip = client_ip.split(",")[0].strip()
 
-    async def log_stream_usage(
-        response_iter, k_index, c_ip, req_body, http_method, endpoint_path
-    ):
+    # 2.5 Immediately store request body and create log entry
+    file_path = store_request_file(client_ip, content or b"")
+    request_id = create_request_log(
+        client_ip=client_ip, method=method, endpoint=clean_path, file_path=file_path
+    )
+
+    async def log_stream_usage(response_iter, k_index, c_ip, request_id):
         # Buffer the tail of the response to ensure we can parse the final JSON
         # Even if it's split across multiple network chunks.
         tail_buffer = b""
@@ -351,19 +365,14 @@ async def _handle_proxy(
                             completion_tokens,
                         )
 
-                        # Store request body and full metadata
-                        file_path = store_request_file(
-                            c_ip, model_name, req_body or b""
-                        )
-                        record_request(
-                            client_ip=c_ip,
-                            method=http_method,
-                            endpoint=endpoint_path,
-                            model=model_name,
-                            prompt_tokens=prompt_tokens,
-                            completion_tokens=completion_tokens,
-                            file_path=file_path,
-                        )
+                        # Update existing request metadata
+                        if request_id is not None:
+                            update_request_log(
+                                request_id=request_id,
+                                model=model_name,
+                                prompt_tokens=prompt_tokens,
+                                completion_tokens=completion_tokens,
+                            )
                         break
                 except json.JSONDecodeError:
                     continue
@@ -413,9 +422,7 @@ async def _handle_proxy(
                     response.aiter_raw(),
                     current_key_index,
                     client_ip,
-                    content,
-                    method,
-                    clean_path,
+                    request_id,
                 ),
                 status_code=response.status_code,
                 headers=dict(response.headers),
