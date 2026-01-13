@@ -1,6 +1,8 @@
+import gzip
 import json
 import os
 import sqlite3
+import uuid
 from datetime import datetime
 from typing import List, Optional
 
@@ -42,6 +44,26 @@ def init_db():
 init_db()
 
 
+def init_extra_tables():
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                client_ip TEXT,
+                method TEXT,
+                endpoint TEXT,
+                model TEXT,
+                prompt_tokens INTEGER,
+                completion_tokens INTEGER,
+                file_path TEXT
+            )
+        """)
+
+
+init_extra_tables()
+
+
 def record_usage(
     client_ip: str,
     key_index: int,
@@ -57,6 +79,68 @@ def record_usage(
             )
     except Exception as e:
         print(f"Error recording usage: {e}")
+
+
+def store_request_file(client_ip: str, model: str, request_body: bytes) -> str:
+    """Store the raw request body compressed as gzip.
+
+    Directory hierarchy:
+        data/requests/<client_ip>/<YYYY-MM-DD>/<model>/...
+
+    Returns the relative file path for DB storage.
+    """
+    safe_ip = client_ip.replace(":", "_")
+    date_str = datetime.utcnow().strftime("%Y-%m-%d")
+    base_dir = os.path.join("data", "requests", safe_ip, date_str, model)
+    os.makedirs(base_dir, exist_ok=True)
+    filename = (
+        datetime.utcnow().strftime("%Y%m%dT%H%M%S") + f"_{uuid.uuid4().hex}.json.gz"
+    )
+    file_path = os.path.join(base_dir, filename)
+    try:
+        with gzip.open(file_path, "wb") as f:
+            f.write(request_body or b"")
+    except Exception as e:
+        print(f"Error storing request file: {e}")
+    return file_path
+
+
+def record_request(
+    client_ip: str,
+    method: str,
+    endpoint: str,
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    file_path: str,
+):
+    """Persist request metadata and link to the stored request body."""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                """
+                INSERT INTO requests (
+                    client_ip,
+                    method,
+                    endpoint,
+                    model,
+                    prompt_tokens,
+                    completion_tokens,
+                    file_path
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    client_ip,
+                    method,
+                    endpoint,
+                    model,
+                    prompt_tokens,
+                    completion_tokens,
+                    file_path,
+                ),
+            )
+    except Exception as e:
+        print(f"Error recording request: {e}")
 
 
 # Configuration
@@ -225,7 +309,9 @@ async def _handle_proxy(
     if "," in client_ip:
         client_ip = client_ip.split(",")[0].strip()
 
-    async def log_stream_usage(response_iter, k_index, c_ip):
+    async def log_stream_usage(
+        response_iter, k_index, c_ip, req_body, http_method, endpoint_path
+    ):
         # Buffer the tail of the response to ensure we can parse the final JSON
         # Even if it's split across multiple network chunks.
         tail_buffer = b""
@@ -252,12 +338,31 @@ async def _handle_proxy(
                     data = json.loads(line)
                     # For both streaming (done=True) and non-streaming responses
                     if data.get("done") or "eval_count" in data:
+                        model_name = data.get("model", "unknown")
+                        prompt_tokens = data.get("prompt_eval_count", 0)
+                        completion_tokens = data.get("eval_count", 0)
+
+                        # Record usage in existing table
                         record_usage(
                             c_ip,
                             k_index,
-                            data.get("model", "unknown"),
-                            data.get("prompt_eval_count", 0),
-                            data.get("eval_count", 0),
+                            model_name,
+                            prompt_tokens,
+                            completion_tokens,
+                        )
+
+                        # Store request body and full metadata
+                        file_path = store_request_file(
+                            c_ip, model_name, req_body or b""
+                        )
+                        record_request(
+                            client_ip=c_ip,
+                            method=http_method,
+                            endpoint=endpoint_path,
+                            model=model_name,
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                            file_path=file_path,
                         )
                         break
                 except json.JSONDecodeError:
@@ -304,7 +409,14 @@ async def _handle_proxy(
             # But Ollama is mostly streaming or single JSON.
             # We wrap the iterator to catch the usage data at the end.
             return StreamingResponse(
-                log_stream_usage(response.aiter_raw(), current_key_index, client_ip),
+                log_stream_usage(
+                    response.aiter_raw(),
+                    current_key_index,
+                    client_ip,
+                    content,
+                    method,
+                    clean_path,
+                ),
                 status_code=response.status_code,
                 headers=dict(response.headers),
                 background=None,
