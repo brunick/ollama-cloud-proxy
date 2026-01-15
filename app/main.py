@@ -359,15 +359,41 @@ async def get_stats():
 async def reset_key_penalty(
     key_index: int, authorization: Optional[str] = Header(None)
 ):
-    """Manually reset the penalty and backoff for a specific key."""
+    """Manually reset the penalty and backoff, then perform an immediate check."""
     await verify_auth(authorization)
 
+    if key_index >= len(OLLAMA_API_KEYS):
+        raise HTTPException(status_code=404, detail="Key index out of range")
+
+    # Clear existing penalties to allow the check to proceed
     if key_index in key_penalty_box:
         del key_penalty_box[key_index]
     if key_index in key_backoff_levels:
         del key_backoff_levels[key_index]
 
-    return {"status": "reset", "key_index": key_index}
+    # Perform immediate health check for this specific key
+    key = OLLAMA_API_KEYS[key_index]
+    now = time.time()
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.get(
+                f"{OLLAMA_CLOUD_URL}/v1/models",
+                headers={"Authorization": f"Bearer {key}"},
+            )
+            if response.status_code == 200:
+                return {"status": "✅ OK", "key_index": key_index}
+            elif response.status_code == 429:
+                # Put back in penalty box if still rate limited
+                key_penalty_box[key_index] = now + BACKOFF_STAGES[0]
+                key_backoff_levels[key_index] = 0
+                return {"status": "🚫 STILL RATE LIMITED", "key_index": key_index}
+            else:
+                return {
+                    "status": f"❌ ERROR {response.status_code}",
+                    "key_index": key_index,
+                }
+        except Exception as e:
+            return {"status": "📡 OFFLINE", "error": str(e), "key_index": key_index}
 
 
 @app.post("/health/keys/{key_index}/penalize")
@@ -979,18 +1005,28 @@ async def dashboard():
         async function resetKey(idx) {
             try {
                 const res = await fetch(`/health/keys/${idx}/reset`, { method: 'POST' });
-                if (res.ok) loadStats();
+                if (!res.ok) {
+                    const error = await res.json();
+                    alert("Reset failed: " + (error.detail || res.statusText));
+                }
+                loadStats();
             } catch (err) {
                 console.error("Failed to reset key", err);
+                alert("Network error while resetting key");
             }
         }
 
         async function penalizeKey(idx) {
             try {
                 const res = await fetch(`/health/keys/${idx}/penalize`, { method: 'POST' });
-                if (res.ok) loadStats();
+                if (!res.ok) {
+                    const error = await res.json();
+                    alert("Penalize failed: " + (error.detail || res.statusText));
+                }
+                loadStats();
             } catch (err) {
                 console.error("Failed to penalize key", err);
+                alert("Network error while penalizing key");
             }
         }
 
