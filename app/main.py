@@ -401,6 +401,29 @@ async def get_minute_stats():
         )
 
 
+@app.get("/stats/24h")
+async def get_24h_stats():
+    """Returns total tokens aggregated by hour for the last 24 hours."""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            query = """
+                SELECT
+                    strftime('%Y-%m-%d %H:00', timestamp) as hour_bucket,
+                    SUM(prompt_tokens + completion_tokens) as total_tokens
+                FROM usage
+                WHERE timestamp >= datetime('now', '-24 hours', 'localtime')
+                GROUP BY hour_bucket
+                ORDER BY hour_bucket ASC
+            """
+            rows = conn.execute(query).fetchall()
+            return [dict(row) for row in rows]
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error retrieving 24h stats: {str(e)}"
+        )
+
+
 @app.get("/queries")
 async def get_queries(
     limit: int = 50,
@@ -493,16 +516,29 @@ async def dashboard():
             </div>
         </header>
 
-        <div class="card rounded-xl p-6 mb-8">
-            <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
-                <i data-lucide="key"></i> API Key Status & Load Balancing
-            </h2>
-            <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4" id="keys-container">
-                <!-- Key status cards will be injected here -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+            <div class="md:col-span-3 card rounded-xl p-6">
+                <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
+                    <i data-lucide="key"></i> API Key Status & Load Balancing
+                </h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="keys-container">
+                    <!-- Key status cards will be injected here -->
+                </div>
+            </div>
+
+            <div class="card rounded-xl p-6 relative overflow-hidden flex flex-col justify-center">
+                <div class="relative z-10">
+                    <h2 class="text-sm font-medium text-slate-400 mb-1 uppercase tracking-wider">Total Tokens (24h)</h2>
+                    <div class="text-4xl font-bold text-white" id="total-tokens-count">0</div>
+                </div>
+                <div class="absolute bottom-0 left-0 w-full h-16 opacity-50">
+                    <canvas id="sparklineChart"></canvas>
+                </div>
             </div>
         </div>
 
         <div class="card rounded-xl p-6 mb-8">
+
             <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
                 <i data-lucide="line-chart"></i> Token Usage (Last 60 Minutes)
             </h2>
@@ -568,19 +604,22 @@ async def dashboard():
 
     <script>
         let usageChart = null;
+        let sparklineChart = null;
 
         async function loadStats() {
             try {
-                const [statsRes, queriesRes, minuteRes, keysRes] = await Promise.all([
+                const [statsRes, queriesRes, minuteRes, keysRes, dailyRes] = await Promise.all([
                     fetch('/stats'),
                     fetch('/queries'),
                     fetch('/stats/minute'),
-                    fetch('/health/keys')
+                    fetch('/health/keys'),
+                    fetch('/stats/24h')
                 ]);
                 const stats = await statsRes.json();
                 const queries = await queriesRes.json();
                 const minuteData = await minuteRes.json();
                 const keysData = await keysRes.json();
+                const dailyData = await dailyRes.json();
                 console.log("Minute data from server:", minuteData);
 
                 const keysContainer = document.getElementById('keys-container');
@@ -634,6 +673,7 @@ async def dashboard():
                 }
 
                 updateChart(minuteData);
+                updateSparkline(dailyData);
                 lucide.createIcons();
             } catch (err) {
                 console.error("Failed to load dashboard data", err);
@@ -752,6 +792,46 @@ async def dashboard():
                 document.getElementById('body-viewer').classList.remove('hidden');
             } catch (err) {
                 alert("Failed to load body");
+            }
+        }
+
+        function updateSparkline(data) {
+            const total = data.reduce((sum, d) => sum + d.total_tokens, 0);
+            document.getElementById('total-tokens-count').textContent = total.toLocaleString();
+
+            const ctx = document.getElementById('sparklineChart').getContext('2d');
+            const labels = data.map(d => d.hour_bucket);
+            const values = data.map(d => d.total_tokens);
+
+            if (sparklineChart) {
+                sparklineChart.data.labels = labels;
+                sparklineChart.data.datasets[0].data = values;
+                sparklineChart.update();
+            } else {
+                sparklineChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            data: values,
+                            borderColor: '#60a5fa',
+                            backgroundColor: 'rgba(96, 165, 250, 0.2)',
+                            fill: true,
+                            tension: 0.4,
+                            pointRadius: 0,
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                        scales: {
+                            x: { display: false },
+                            y: { display: false, beginAtZero: true }
+                        }
+                    }
+                });
             }
         }
 
