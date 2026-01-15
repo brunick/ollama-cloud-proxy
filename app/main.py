@@ -942,8 +942,6 @@ async def _handle_proxy(
     content = await request.body() if request else None
     params = request.query_params if request else None
 
-    client = httpx.AsyncClient(timeout=None)
-
     # Get client IP, considering potential proxies
     if request:
         client_ip = request.headers.get("X-Forwarded-For", request.client.host)
@@ -1014,85 +1012,90 @@ async def _handle_proxy(
             print(f"Logging error: {e}")
 
     # 3. Handle Streaming or normal response with retry logic for 429
-    # Start with the best key based on usage and penalty box
     attempted_indices = set()
+    last_exception = None
 
-    for attempt in range(len(OLLAMA_API_KEYS)):
-        # Pick the best key that hasn't been tried yet in this request
-        # We need to exclude attempted indices from the selection
-        available_indices = [
-            i for i in range(len(OLLAMA_API_KEYS)) if i not in attempted_indices
-        ]
-        if not available_indices:
-            break
+    async with httpx.AsyncClient(timeout=None) as client:
+        for attempt in range(len(OLLAMA_API_KEYS)):
+            available_indices = [
+                i for i in range(len(OLLAMA_API_KEYS)) if i not in attempted_indices
+            ]
+            if not available_indices:
+                break
 
-        # Re-evaluating best key among those not yet tried
-        current_key_index = get_best_key_index(exclude=attempted_indices)
+            current_key_index = get_best_key_index(exclude=attempted_indices)
+            if current_key_index is None or current_key_index in attempted_indices:
+                current_key_index = available_indices[0]
 
-        # Fallback if get_best_key_index doesn't support exclusion yet or fails
-        if current_key_index is None or current_key_index in attempted_indices:
-            current_key_index = available_indices[0]
+            attempted_indices.add(current_key_index)
+            current_key = OLLAMA_API_KEYS[current_key_index]
 
-        attempted_indices.add(current_key_index)
-        current_key = OLLAMA_API_KEYS[current_key_index]
-
-        headers = {
-            "Authorization": f"Bearer {current_key}",
-            "Content-Type": request.headers.get("Content-Type", "application/json")
-            if request
-            else "application/json",
-        }
-
-        try:
-            req = client.build_request(
-                method, url, content=content, params=params, headers=headers
-            )
-            response = await client.send(req, stream=True)
-
-            # If quota exceeded, put in penalty box and try next key
-            if response.status_code == 429 and len(OLLAMA_API_KEYS) > 1:
-                # Penalty for 5 minutes or based on reset header if available
-                reset_after = 300
-                if "x-ratelimit-reset" in response.headers:
-                    try:
-                        reset_after = int(response.headers["x-ratelimit-reset"])
-                    except:
-                        pass
-
-                key_penalty_box[current_key_index] = time.time() + reset_after
-                print(
-                    f"Key {current_key_index} exceeded quota (429). Penalized for {reset_after}s. Rotating..."
-                )
-                await response.aclose()
-                continue
-
-            # Capture rate limit headers
-            rl_headers = {
-                k.lower(): v
-                for k, v in response.headers.items()
-                if k.lower().startswith("x-ratelimit-")
+            headers = {
+                "Authorization": f"Bearer {current_key}",
+                "Content-Type": request.headers.get("Content-Type", "application/json")
+                if request
+                else "application/json",
             }
-            if rl_headers:
-                rate_limit_store[f"key_{current_key_index}"] = rl_headers
 
-            # If not a stream or if we want to parse it later, we need to handle it.
-            # But Ollama is mostly streaming or single JSON.
-            # We wrap the iterator to catch the usage data at the end.
-            return StreamingResponse(
-                log_stream_usage(
-                    response.aiter_raw(),
-                    current_key_index,
-                    client_ip,
-                    request_id,
-                ),
-                status_code=response.status_code,
-                headers=dict(response.headers),
-                background=None,
-            )
-        except Exception as e:
-            if attempt == len(OLLAMA_API_KEYS) - 1:
-                raise HTTPException(status_code=500, detail=str(e))
-            print(f"Request failed with error: {e}. Retrying with next key.")
+            try:
+                req = client.build_request(
+                    method, url, content=content, params=params, headers=headers
+                )
+                response = await client.send(req, stream=True)
+
+                # If quota exceeded, penalize and retry if possible
+                if response.status_code == 429:
+                    reset_after = 300
+                    if "x-ratelimit-reset" in response.headers:
+                        try:
+                            reset_after = int(response.headers["x-ratelimit-reset"])
+                        except:
+                            pass
+
+                    key_penalty_box[current_key_index] = time.time() + reset_after
+                    print(
+                        f"Key {current_key_index} (attempt {attempt + 1}) exceeded quota (429). Penalized for {reset_after}s."
+                    )
+
+                    if attempt < len(OLLAMA_API_KEYS) - 1:
+                        await response.aclose()
+                        continue
+                    # On last attempt, we must return the response (which is 429)
+
+                # Capture rate limit headers
+                rl_headers = {
+                    k.lower(): v
+                    for k, v in response.headers.items()
+                    if k.lower().startswith("x-ratelimit-")
+                }
+                if rl_headers:
+                    rate_limit_store[f"key_{current_key_index}"] = rl_headers
+
+                # Return the successful (or final 429) response
+                return StreamingResponse(
+                    log_stream_usage(
+                        response.aiter_raw(),
+                        current_key_index,
+                        client_ip,
+                        request_id,
+                    ),
+                    status_code=response.status_code,
+                    headers=dict(response.headers),
+                )
+            except Exception as e:
+                last_exception = e
+                print(f"Key {current_key_index} (attempt {attempt + 1}) failed: {e}")
+                if attempt < len(OLLAMA_API_KEYS) - 1:
+                    continue
+                break
+
+    # If we reached here, all attempts failed with exceptions or exhausted keys
+    error_detail = (
+        str(last_exception)
+        if last_exception
+        else "All API keys exhausted or rate-limited"
+    )
+    raise HTTPException(status_code=500, detail=error_detail)
 
     raise HTTPException(status_code=429, detail="All API keys have exceeded quota")
 
