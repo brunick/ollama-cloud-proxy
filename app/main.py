@@ -424,28 +424,36 @@ async def dashboard():
                 const queries = await queriesRes.json();
 
                 const statsBody = document.getElementById('stats-body');
-                statsBody.innerHTML = stats.map(s => `
-                    <tr class="border-b border-slate-700 hover:bg-slate-800/50">
-                        <td class="px-4 py-3">${s.date} ${s.hour}:00</td>
-                        <td class="px-4 py-3 text-slate-400">${s.client_ip}</td>
-                        <td class="px-4 py-3 font-mono">${s.model}</td>
-                        <td class="px-4 py-3 text-right">${s.requests}</td>
-                        <td class="px-4 py-3 text-right text-blue-400">${s.prompt_tokens + s.completion_tokens}</td>
-                    </tr>
-                `).join('');
+                if (stats.length === 0) {
+                    statsBody.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-slate-500">No statistics available yet</td></tr>';
+                } else {
+                    statsBody.innerHTML = stats.map(s => `
+                        <tr class="border-b border-slate-700 hover:bg-slate-800/50">
+                            <td class="px-4 py-3">${s.date} ${s.hour}:00</td>
+                            <td class="px-4 py-3 text-slate-400">${s.client_ip}</td>
+                            <td class="px-4 py-3 font-mono">${s.model}</td>
+                            <td class="px-4 py-3 text-right">${s.requests}</td>
+                            <td class="px-4 py-3 text-right text-blue-400">${s.prompt_tokens + s.completion_tokens}</td>
+                        </tr>
+                    `).join('');
+                }
 
                 const queriesBody = document.getElementById('queries-body');
-                queriesBody.innerHTML = queries.map(q => `
-                    <tr class="border-b border-slate-700 hover:bg-slate-800/50">
-                        <td class="px-4 py-3 whitespace-nowrap">${q.timestamp}</td>
-                        <td class="px-4 py-3 text-slate-400">${q.client_ip}</td>
-                        <td class="px-4 py-3 font-mono">${q.model}</td>
-                        <td class="px-4 py-3 text-blue-400">${q.prompt_tokens + q.completion_tokens}</td>
-                        <td class="px-4 py-3 text-right">
-                            <button onclick="viewBody(${q.id})" class="text-blue-400 hover:underline">View</button>
-                        </td>
-                    </tr>
-                `).join('');
+                if (queries.length === 0) {
+                    queriesBody.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-slate-500">No queries found</td></tr>';
+                } else {
+                    queriesBody.innerHTML = queries.map(q => `
+                        <tr class="border-b border-slate-700 hover:bg-slate-800/50">
+                            <td class="px-4 py-3 whitespace-nowrap">${q.timestamp}</td>
+                            <td class="px-4 py-3 text-slate-400">${q.client_ip}</td>
+                            <td class="px-4 py-3 font-mono">${q.model}</td>
+                            <td class="px-4 py-3 text-blue-400">${q.prompt_tokens + q.completion_tokens}</td>
+                            <td class="px-4 py-3 text-right">
+                                <button onclick="viewBody(${q.id})" class="text-blue-400 hover:underline">View</button>
+                            </td>
+                        </tr>
+                    `).join('');
+                }
 
                 lucide.createIcons();
             } catch (err) {
@@ -455,7 +463,7 @@ async def dashboard():
 
         async function viewBody(id) {
             try {
-                const res = await fetch(\`/queries/\${id}/body\`);
+                const res = await fetch('/queries/' + id + '/body');
                 const data = await res.json();
                 document.getElementById('body-content').textContent = JSON.stringify(data, null, 2);
                 document.getElementById('body-viewer').classList.remove('hidden');
