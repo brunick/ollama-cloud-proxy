@@ -212,6 +212,11 @@ async def verify_auth(auth_header: Optional[str]):
         raise HTTPException(status_code=403, detail="Forbidden: Invalid proxy token")
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return ""
+
+
 @app.get("/")
 async def health_check():
     """Health check endpoint to verify proxy status and Ollama Cloud connectivity."""
@@ -277,10 +282,11 @@ async def get_minute_stats():
             query = """
                 SELECT
                     strftime('%H:%M', timestamp) as minute,
+                    model,
                     SUM(prompt_tokens + completion_tokens) as total_tokens
                 FROM usage
-                WHERE timestamp >= datetime('now', '-60 minutes')
-                GROUP BY minute
+                WHERE timestamp >= datetime('now', '-60 minutes', 'localtime')
+                GROUP BY minute, model
                 ORDER BY minute ASC
             """
             rows = conn.execute(query).fetchall()
@@ -460,6 +466,7 @@ async def dashboard():
                 const stats = await statsRes.json();
                 const queries = await queriesRes.json();
                 const minuteData = await minuteRes.json();
+                console.log("Minute data from server:", minuteData);
 
                 const statsBody = document.getElementById('stats-body');
                 if (stats.length === 0) {
@@ -500,52 +507,99 @@ async def dashboard():
             }
         }
 
+        const colors = [
+            '#60a5fa', '#34d399', '#a78bfa', '#fbbf24', '#f87171', '#22d3ee', '#fb7185'
+        ];
+
         function updateChart(data) {
             const ctx = document.getElementById('usageChart').getContext('2d');
 
-            // Fill in missing minutes for a smooth graph
+            const models = [...new Set(data.map(d => d.model))];
             const labels = [];
-            const values = [];
+
+            // Prepare datasets for models
+            const modelDatasets = models.map((model, idx) => ({
+                label: model,
+                data: [],
+                borderColor: colors[idx % colors.length],
+                backgroundColor: colors[idx % colors.length] + '44',
+                fill: true,
+                tension: 0.4,
+                pointRadius: 0,
+                yAxisID: 'y',
+                stack: 'models' // Stack models together
+            }));
+
+            const totalData = [];
             const now = new Date();
+
             for (let i = 59; i >= 0; i--) {
                 const d = new Date(now.getTime() - i * 60000);
-                const timeStr = d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
-                labels.push(timeStr);
+                // Try both UTC and Local to be safe with server config
+                const timeStrLocal = d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+                const timeStrUTC = d.getUTCHours().toString().padStart(2, '0') + ':' + d.getUTCMinutes().toString().padStart(2, '0');
+                labels.push(timeStrLocal);
 
-                const entry = data.find(d => d.minute === timeStr);
-                values.push(entry ? entry.total_tokens : 0);
+                let minuteTotal = 0;
+                models.forEach((model, idx) => {
+                    const entry = data.find(e => (e.minute === timeStrLocal || e.minute === timeStrUTC) && e.model === model);
+                    const val = entry ? entry.total_tokens : 0;
+                    modelDatasets[idx].data.push(val);
+                    minuteTotal += val;
+                });
+                totalData.push(minuteTotal);
             }
+
+            const totalDataset = {
+                label: 'Total Sum',
+                data: totalData,
+                borderColor: '#ffffff',
+                borderWidth: 2,
+                borderDash: [5, 5],
+                fill: false,
+                tension: 0.4,
+                pointRadius: 0,
+                yAxisID: 'yTotal' // Use separate axis to avoid double stacking
+            };
+
+            const finalDatasets = [...modelDatasets, totalDataset];
 
             if (usageChart) {
                 usageChart.data.labels = labels;
-                usageChart.data.datasets[0].data = values;
+                usageChart.data.datasets = finalDatasets;
                 usageChart.update();
             } else {
                 usageChart = new Chart(ctx, {
                     type: 'line',
                     data: {
                         labels: labels,
-                        datasets: [{
-                            label: 'Total Tokens',
-                            data: values,
-                            borderColor: '#60a5fa',
-                            backgroundColor: 'rgba(96, 165, 250, 0.1)',
-                            fill: true,
-                            tension: 0.4,
-                            pointRadius: 0
-                        }]
+                        datasets: finalDatasets
                     },
                     options: {
                         responsive: true,
                         maintainAspectRatio: false,
+                        interaction: { mode: 'index', intersect: false },
                         plugins: {
-                            legend: { display: false }
+                            legend: {
+                                display: true,
+                                position: 'top',
+                                labels: { color: '#94a3b8', boxWidth: 12 }
+                            }
                         },
                         scales: {
                             y: {
+                                stacked: true,
                                 beginAtZero: true,
                                 grid: { color: '#334155' },
-                                ticks: { color: '#94a3b8' }
+                                ticks: { color: '#94a3b8' },
+                                title: { display: true, text: 'Tokens (Stacked)', color: '#64748b' }
+                            },
+                            yTotal: {
+                                display: false, // Hidden but provides the scale for the total line
+                                stacked: false,
+                                beginAtZero: true,
+                                // Sync this with y axis scale
+                                suggestMax: Math.max(...totalData) * 1.1
                             },
                             x: {
                                 grid: { display: false },
