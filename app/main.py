@@ -322,8 +322,7 @@ async def get_stats():
             # Aggregate by date, hour, key_index, and model
             query = """
                 SELECT
-                    strftime('%Y-%m-%d', timestamp, 'localtime') as date,
-                    strftime('%H', timestamp, 'localtime') as hour,
+                    strftime('%Y-%m-%dT%H:00:00Z', timestamp) as bucket,
                     client_ip,
                     key_index,
                     model,
@@ -400,11 +399,11 @@ async def get_minute_stats(window: int = 60):
             # Use current_timestamp - window minutes
             query = """
                 SELECT
-                    strftime('%Y-%m-%d %H:%M', timestamp, 'localtime') as minute,
+                    strftime('%Y-%m-%dT%H:%M:00Z', timestamp) as minute,
                     model,
                     SUM(prompt_tokens + completion_tokens) as total_tokens
                 FROM usage
-                WHERE timestamp >= datetime('now', ?, 'localtime')
+                WHERE timestamp >= datetime('now', ?)
                 GROUP BY minute, model
                 ORDER BY minute ASC
             """
@@ -424,10 +423,10 @@ async def get_24h_stats():
             conn.row_factory = sqlite3.Row
             query = """
                 SELECT
-                    strftime('%Y-%m-%d %H:00', timestamp, 'localtime') as hour_bucket,
+                    strftime('%Y-%m-%dT%H:00:00Z', timestamp) as hour_bucket,
                     SUM(prompt_tokens + completion_tokens) as total_tokens
                 FROM usage
-                WHERE timestamp >= datetime('now', '-24 hours', 'localtime')
+                WHERE timestamp >= datetime('now', '-24 hours')
                 GROUP BY hour_bucket
                 ORDER BY hour_bucket ASC
             """
@@ -657,7 +656,6 @@ async def dashboard():
                 const minuteData = await minuteRes.json();
                 const keysData = await keysRes.json();
                 const dailyData = await dailyRes.json();
-                console.log("Minute data from server:", minuteData);
 
                 const keysContainer = document.getElementById('keys-container');
                 keysContainer.innerHTML = Object.entries(keysData).map(([keyId, info]) => {
@@ -681,24 +679,31 @@ async def dashboard():
                 if (stats.length === 0) {
                     statsBody.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-slate-500">No statistics available yet</td></tr>';
                 } else {
-                    statsBody.innerHTML = stats.map(s => `
+                    statsBody.innerHTML = stats.map(s => {
+                        const localTime = new Date(s.bucket).toLocaleString();
+                        return `
                         <tr class="border-b border-slate-700 hover:bg-slate-800/50">
-                            <td class="px-4 py-3">${s.date} ${s.hour}:00</td>
+                            <td class="px-4 py-3">${localTime}</td>
                             <td class="px-4 py-3 text-slate-400">${s.client_ip}</td>
                             <td class="px-4 py-3 font-mono">${s.model}</td>
                             <td class="px-4 py-3 text-right">${s.requests}</td>
                             <td class="px-4 py-3 text-right text-blue-400">${s.prompt_tokens + s.completion_tokens}</td>
                         </tr>
-                    `).join('');
+                        `;
+                    }).join('');
                 }
 
                 const queriesBody = document.getElementById('queries-body');
                 if (queries.length === 0) {
                     queriesBody.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-slate-500">No queries found</td></tr>';
                 } else {
-                    queriesBody.innerHTML = queries.map(q => `
+                    queriesBody.innerHTML = queries.map(q => {
+                        // DB timestamp is CURRENT_TIMESTAMP (UTC), but SQLite doesn't append 'Z'
+                        const timestamp = q.timestamp.includes('Z') ? q.timestamp : q.timestamp + 'Z';
+                        const localTime = new Date(timestamp).toLocaleString();
+                        return `
                         <tr class="border-b border-slate-700 hover:bg-slate-800/50">
-                            <td class="px-4 py-3 whitespace-nowrap">${q.timestamp}</td>
+                            <td class="px-4 py-3 whitespace-nowrap">${localTime}</td>
                             <td class="px-4 py-3 text-slate-400">${q.client_ip}</td>
                             <td class="px-4 py-3 font-mono">${q.model}</td>
                             <td class="px-4 py-3 text-blue-400">${q.prompt_tokens + q.completion_tokens}</td>
@@ -706,7 +711,8 @@ async def dashboard():
                                 <button onclick="viewBody(${q.id})" class="text-blue-400 hover:underline">View</button>
                             </td>
                         </tr>
-                    `).join('');
+                        `;
+                    }).join('');
                 }
 
                 updateChart(minuteData);
@@ -747,18 +753,12 @@ async def dashboard():
             for (let i = currentTimeRange - 1; i >= 0; i--) {
                 const d = new Date(now.getTime() - i * 60000);
 
-                // For matching with the backend (YYYY-MM-DD HH:MM)
-                const year = d.getFullYear();
-                const month = (d.getMonth() + 1).toString().padStart(2, '0');
-                const day = d.getDate().toString().padStart(2, '0');
-                const hours = d.getHours().toString().padStart(2, '0');
-                const minutes = d.getMinutes().toString().padStart(2, '0');
-                const fullKeyLocal = `${year}-${month}-${day} ${hours}:${minutes}`;
+                // Construct ISO string for matching (YYYY-MM-DDTHH:MM:00Z)
+                const isoStr = d.toISOString().substring(0, 16) + ":00Z";
 
-                // For display labels
-                const timeStrDisplay = hours + ':' + minutes;
+                // For display labels in local time
+                const timeStrDisplay = d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
 
-                // Only push label for every nth minute depending on range to keep x-axis clean
                 const labelFreq = currentTimeRange <= 120 ? 10 : (currentTimeRange <= 360 ? 30 : 60);
                 if (i % labelFreq === 0 || i === currentTimeRange - 1 || i === 0) {
                     labels.push(timeStrDisplay);
@@ -768,8 +768,7 @@ async def dashboard():
 
                 let minuteTotal = 0;
                 models.forEach((model, idx) => {
-                    // Match using the unique YYYY-MM-DD HH:MM string
-                    const entry = data.find(e => e.minute === fullKeyLocal && e.model === model);
+                    const entry = data.find(e => e.minute === isoStr && e.model === model);
                     const val = entry ? entry.total_tokens : 0;
                     modelDatasets[idx].data.push(val);
                     minuteTotal += val;
@@ -854,7 +853,7 @@ async def dashboard():
             document.getElementById('total-tokens-count').textContent = total.toLocaleString();
 
             const ctx = document.getElementById('sparklineChart').getContext('2d');
-            const labels = data.map(d => d.hour_bucket);
+            const labels = data.map(d => new Date(d.hour_bucket).toLocaleString());
             const values = data.map(d => d.total_tokens);
 
             if (sparklineChart) {
