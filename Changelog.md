@@ -2,6 +2,14 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.16.0] - 2024-05-24
+### ⚠️ BREAKING CHANGES
+- **API-Key Konfiguration**: Die Unterstützung für API-Keys über die Umgebungsvariablen `OLLAMA_API_KEYS` und `OLLAMA_API_KEY` wurde entfernt.
+- **Migration**: Alle Keys müssen nun zwingend in der `config/config.yaml` hinterlegt werden. Eine Vorlage findet sich in `config/config.template.yaml`.
+
+### Added
+- 📄 Konfigurations-Template: `config/config.template.yaml` hinzugefügt.
+
 ## [1.15.0] - 2024-05-24
 ### Added
 - 🎨 Dashboard-Optimierung: Scrollbare Container für die Tabellen "Aggregated Stats" und "Recent Queries".

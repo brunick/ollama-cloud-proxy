@@ -20,12 +20,11 @@ Dieser Proxy leitet Anfragen an die offizielle Ollama Cloud API (`https://ollama
 ## Setup
 
 1. **Konfiguration**:
-   Erstelle eine `.env` Datei im Stammverzeichnis oder setze die Umgebungsvariablen direkt.
+   Erstelle eine `.env` Datei im Stammverzeichnis für grundlegende Einstellungen. Die API-Keys müssen zwingend in einer Konfigurationsdatei hinterlegt werden.
 
-   ### Mehrere API-Keys (Rotation)
-   Du kannst mehrere Keys über eine Konfigurationsdatei oder eine Umgebungsvariable angeben:
+   ### API-Keys konfigurieren (`config/config.yaml`)
+   Erstelle oder bearbeite die Datei `config/config.yaml` im Projektordner. Hier werden alle Keys für das Load-Balancing und die Rotation hinterlegt:
 
-   **Option A: `config/config.yaml` (Empfohlen)**
    ```yaml
    keys:
      - "key_1"
@@ -33,16 +32,13 @@ Dieser Proxy leitet Anfragen an die offizielle Ollama Cloud API (`https://ollama
      - "key_3"
    ```
 
-   **Option B: Umgebungsvariable**
-   ```env
-   OLLAMA_API_KEYS=key1,key2,key3
-   ```
-
-   ### Weitere Optionen
+   ### Weitere Optionen (.env)
    ```env
    PROXY_AUTH_TOKEN=ein_geheimes_passwort_fuer_lokal
    ALLOW_UNAUTHENTICATED_ACCESS=false # Wenn true, wird kein Token benötigt
    ```
+
+   *Hinweis: Die Umgebungsvariable `OLLAMA_API_KEYS` wird nicht mehr unterstützt. Bitte nutze ausschließlich die `config.yaml`.*
 
 2. **Container starten**:
    ```bash

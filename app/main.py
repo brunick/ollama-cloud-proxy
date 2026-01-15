@@ -172,8 +172,8 @@ CONFIG_PATH = os.getenv("CONFIG_PATH", "config/config.yaml")
 
 
 def load_keys() -> List[str]:
+    """Load API keys exclusively from the config file."""
     keys = []
-    # 1. Try loading from config file
     if os.path.exists(CONFIG_PATH):
         try:
             with open(CONFIG_PATH, "r") as f:
@@ -183,10 +183,10 @@ def load_keys() -> List[str]:
         except Exception as e:
             print(f"Error loading config file: {e}")
 
-    # 2. Fallback to environment variables
     if not keys:
-        env_keys = os.getenv("OLLAMA_API_KEYS", os.getenv("OLLAMA_API_KEY", ""))
-        keys = [k.strip() for k in env_keys.split(",") if k.strip()]
+        print(
+            f"CRITICAL: No API keys found in {CONFIG_PATH}. Please provide keys in the config file."
+        )
 
     return keys
 

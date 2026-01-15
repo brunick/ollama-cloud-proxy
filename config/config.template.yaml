@@ -1,0 +1,9 @@
+# Ollama Cloud Proxy Configuration Template
+# Kopiere diese Datei nach config.yaml und trage deine Keys ein.
+
+# Liste der Ollama Cloud API-Keys für Load-Balancing und Rotation.
+# Deine Keys findest du unter: https://ollama.com/settings/api-keys
+keys:
+  - "dein_erster_api_key_hier"
+  - "dein_zweiter_api_key_hier"
+  # - "weitere_keys_koennen_hier_ergaenzt_werden"
