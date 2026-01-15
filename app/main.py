@@ -267,6 +267,30 @@ async def get_stats():
         raise HTTPException(status_code=500, detail=f"Error retrieving stats: {str(e)}")
 
 
+@app.get("/stats/minute")
+async def get_minute_stats():
+    """Returns token usage aggregated by minute for the last 60 minutes."""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            # Use current_timestamp - 60 minutes
+            query = """
+                SELECT
+                    strftime('%H:%M', timestamp) as minute,
+                    SUM(prompt_tokens + completion_tokens) as total_tokens
+                FROM usage
+                WHERE timestamp >= datetime('now', '-60 minutes')
+                GROUP BY minute
+                ORDER BY minute ASC
+            """
+            rows = conn.execute(query).fetchall()
+            return [dict(row) for row in rows]
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error retrieving minute stats: {str(e)}"
+        )
+
+
 @app.get("/queries")
 async def get_queries(
     limit: int = 50,
@@ -336,6 +360,7 @@ async def dashboard():
     <title>Ollama Proxy Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body { background-color: #0f172a; color: #f8fafc; }
         .card { background-color: #1e293b; border: 1px solid #334155; }
@@ -357,6 +382,15 @@ async def dashboard():
                 </button>
             </div>
         </header>
+
+        <div class="card rounded-xl p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
+                <i data-lucide="line-chart"></i> Token Usage (Last 60 Minutes)
+            </h2>
+            <div class="h-64 w-full">
+                <canvas id="usageChart"></canvas>
+            </div>
+        </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
             <div class="card rounded-xl p-6">
@@ -414,14 +448,18 @@ async def dashboard():
     </div>
 
     <script>
+        let usageChart = null;
+
         async function loadStats() {
             try {
-                const [statsRes, queriesRes] = await Promise.all([
+                const [statsRes, queriesRes, minuteRes] = await Promise.all([
                     fetch('/stats'),
-                    fetch('/queries')
+                    fetch('/queries'),
+                    fetch('/stats/minute')
                 ]);
                 const stats = await statsRes.json();
                 const queries = await queriesRes.json();
+                const minuteData = await minuteRes.json();
 
                 const statsBody = document.getElementById('stats-body');
                 if (stats.length === 0) {
@@ -455,9 +493,67 @@ async def dashboard():
                     `).join('');
                 }
 
+                updateChart(minuteData);
                 lucide.createIcons();
             } catch (err) {
                 console.error("Failed to load dashboard data", err);
+            }
+        }
+
+        function updateChart(data) {
+            const ctx = document.getElementById('usageChart').getContext('2d');
+
+            // Fill in missing minutes for a smooth graph
+            const labels = [];
+            const values = [];
+            const now = new Date();
+            for (let i = 59; i >= 0; i--) {
+                const d = new Date(now.getTime() - i * 60000);
+                const timeStr = d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
+                labels.push(timeStr);
+
+                const entry = data.find(d => d.minute === timeStr);
+                values.push(entry ? entry.total_tokens : 0);
+            }
+
+            if (usageChart) {
+                usageChart.data.labels = labels;
+                usageChart.data.datasets[0].data = values;
+                usageChart.update();
+            } else {
+                usageChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Total Tokens',
+                            data: values,
+                            borderColor: '#60a5fa',
+                            backgroundColor: 'rgba(96, 165, 250, 0.1)',
+                            fill: true,
+                            tension: 0.4,
+                            pointRadius: 0
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                grid: { color: '#334155' },
+                                ticks: { color: '#94a3b8' }
+                            },
+                            x: {
+                                grid: { display: false },
+                                ticks: { color: '#94a3b8', maxTicksLimit: 10 }
+                            }
+                        }
+                    }
+                });
             }
         }
 
