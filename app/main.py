@@ -1,10 +1,14 @@
+# To check key health externally, use:
+# curl -H "Authorization: Bearer $PROXY_AUTH_TOKEN" http://localhost:11434/health/keys
+
 import gzip
 import json
 import os
 import sqlite3
+import time
 import uuid
-from datetime import datetime
-from typing import List, Optional
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional
 
 import httpx
 import yaml
@@ -15,6 +19,8 @@ app = FastAPI()
 
 # Store latest rate limit headers per key index
 rate_limit_store = {}
+# Penalty box for keys that returned 429: {key_index: expiration_timestamp}
+key_penalty_box: Dict[int, float] = {}
 
 # Database setup
 DB_PATH = "data/usage.db"
@@ -186,7 +192,54 @@ OLLAMA_API_KEYS = load_keys()
 if not OLLAMA_API_KEYS:
     raise ValueError("No OLLAMA_API_KEYS found in config or environment variables")
 
-current_key_index = 0
+
+def get_best_key_index() -> int:
+    """Find the best key index based on usage in the last 2 hours and penalty box."""
+    now = time.time()
+
+    # Filter out keys in penalty box
+    available_indices = [
+        i
+        for i in range(len(OLLAMA_API_KEYS))
+        if i not in key_penalty_box or key_penalty_box[i] < now
+    ]
+
+    # If all keys are penalized, use the one that expires soonest
+    if not available_indices:
+        return min(key_penalty_box, key=key_penalty_box.get)
+
+    # If only one key available, return it
+    if len(available_indices) == 1:
+        return available_indices[0]
+
+    # Query usage for available keys in the last 2 hours
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            placeholders = ",".join(["?"] * len(available_indices))
+            query = f"""
+                SELECT key_index, SUM(prompt_tokens + completion_tokens) as usage
+                FROM usage
+                WHERE timestamp >= datetime('now', '-2 hours')
+                AND key_index IN ({placeholders})
+                GROUP BY key_index
+            """
+            rows = conn.execute(query, available_indices).fetchall()
+            usage_map = {row["key_index"]: row["usage"] for row in rows}
+
+            # Find the index with minimum usage among available
+            best_index = available_indices[0]
+            min_usage = usage_map.get(best_index, 0)
+
+            for idx in available_indices:
+                usage = usage_map.get(idx, 0)
+                if usage < min_usage:
+                    min_usage = usage
+                    best_index = idx
+            return best_index
+    except Exception as e:
+        print(f"Error determining best key: {e}")
+        return available_indices[0]
 
 
 async def verify_auth(auth_header: Optional[str]):
@@ -270,6 +323,57 @@ async def get_stats():
             return [dict(row) for row in rows]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving stats: {str(e)}")
+
+
+@app.get("/health/keys")
+async def check_keys_health(authorization: Optional[str] = Header(None)):
+    """Manually trigger a health check for all keys."""
+    await verify_auth(authorization)
+
+    results = {}
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for i, key in enumerate(OLLAMA_API_KEYS):
+            try:
+                # Use a lightweight request to check key status
+                response = await client.get(
+                    f"{OLLAMA_CLOUD_URL}/v1/models",
+                    headers={"Authorization": f"Bearer {key}"},
+                )
+                status = (
+                    "ok"
+                    if response.status_code == 200
+                    else f"error_{response.status_code}"
+                )
+
+                if response.status_code == 429:
+                    # Put in penalty box for 5 minutes if 429 found
+                    key_penalty_box[i] = time.time() + 300
+                    status = "penalized_429"
+                elif i in key_penalty_box and key_penalty_box[i] < time.time():
+                    del key_penalty_box[i]
+
+                results[f"key_{i}"] = {
+                    "status": status,
+                    "penalty_active": i in key_penalty_box,
+                    "usage_2h": 0,  # Placeholder
+                }
+            except Exception as e:
+                results[f"key_{i}"] = {"status": "unreachable", "error": str(e)}
+
+    # Add usage info
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        usage_rows = conn.execute("""
+            SELECT key_index, SUM(prompt_tokens + completion_tokens) as usage
+            FROM usage WHERE timestamp >= datetime('now', '-2 hours')
+            GROUP BY key_index
+        """).fetchall()
+        for row in usage_rows:
+            key_id = f"key_{row['key_index']}"
+            if key_id in results:
+                results[key_id]["usage_2h"] = row["usage"]
+
+    return results
 
 
 @app.get("/stats/minute")
@@ -391,6 +495,15 @@ async def dashboard():
 
         <div class="card rounded-xl p-6 mb-8">
             <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
+                <i data-lucide="key"></i> API Key Status & Load Balancing
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4" id="keys-container">
+                <!-- Key status cards will be injected here -->
+            </div>
+        </div>
+
+        <div class="card rounded-xl p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
                 <i data-lucide="line-chart"></i> Token Usage (Last 60 Minutes)
             </h2>
             <div class="h-64 w-full">
@@ -458,15 +571,35 @@ async def dashboard():
 
         async function loadStats() {
             try {
-                const [statsRes, queriesRes, minuteRes] = await Promise.all([
+                const [statsRes, queriesRes, minuteRes, keysRes] = await Promise.all([
                     fetch('/stats'),
                     fetch('/queries'),
-                    fetch('/stats/minute')
+                    fetch('/stats/minute'),
+                    fetch('/health/keys')
                 ]);
                 const stats = await statsRes.json();
                 const queries = await queriesRes.json();
                 const minuteData = await minuteRes.json();
+                const keysData = await keysRes.json();
                 console.log("Minute data from server:", minuteData);
+
+                const keysContainer = document.getElementById('keys-container');
+                keysContainer.innerHTML = Object.entries(keysData).map(([keyId, info]) => {
+                    const isPenalized = info.penalty_active;
+                    const statusColor = isPenalized ? 'text-red-400' : (info.status === 'ok' ? 'text-green-400' : 'text-yellow-400');
+                    return `
+                        <div class="bg-slate-800/50 p-4 rounded-lg border ${isPenalized ? 'border-red-500/50' : 'border-slate-700'}">
+                            <div class="flex justify-between items-start mb-2">
+                                <span class="font-bold text-slate-300">${keyId}</span>
+                                <span class="text-xs ${statusColor} px-2 py-0.5 rounded bg-slate-900">${info.status}</span>
+                            </div>
+                            <div class="text-xs text-slate-400">
+                                <div>Usage (2h): <span class="text-blue-400">${info.usage_2h.toLocaleString()}</span> tokens</div>
+                                ${isPenalized ? `<div class="text-red-400 mt-1 flex items-center gap-1"><i data-lucide="alert-circle" size="12"></i> Penalized (429)</div>` : ''}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
 
                 const statsBody = document.getElementById('stats-body');
                 if (stats.length === 0) {
@@ -676,7 +809,6 @@ async def _handle_proxy(
     content = await request.body() if request else None
     params = request.query_params if request else None
 
-    global current_key_index
     client = httpx.AsyncClient(timeout=None)
 
     # Get client IP, considering potential proxies
@@ -749,7 +881,24 @@ async def _handle_proxy(
             print(f"Logging error: {e}")
 
     # 3. Handle Streaming or normal response with retry logic for 429
+    # Start with the best key based on usage and penalty box
+    attempted_indices = set()
+
     for attempt in range(len(OLLAMA_API_KEYS)):
+        # Pick the best key that hasn't been tried yet in this request
+        current_key_index = get_best_key_index()
+
+        # If the best key was already attempted (e.g. it just failed),
+        # fallback to any key not yet tried
+        if current_key_index in attempted_indices:
+            remaining = [
+                i for i in range(len(OLLAMA_API_KEYS)) if i not in attempted_indices
+            ]
+            if not remaining:
+                break
+            current_key_index = remaining[0]
+
+        attempted_indices.add(current_key_index)
         current_key = OLLAMA_API_KEYS[current_key_index]
 
         headers = {
@@ -765,13 +914,21 @@ async def _handle_proxy(
             )
             response = await client.send(req, stream=True)
 
-            # If quota exceeded, rotate key and try again
+            # If quota exceeded, put in penalty box and try next key
             if response.status_code == 429 and len(OLLAMA_API_KEYS) > 1:
+                # Penalty for 5 minutes or based on reset header if available
+                reset_after = 300
+                if "x-ratelimit-reset" in response.headers:
+                    try:
+                        reset_after = int(response.headers["x-ratelimit-reset"])
+                    except:
+                        pass
+
+                key_penalty_box[current_key_index] = time.time() + reset_after
                 print(
-                    f"Key {current_key_index} exceeded quota (429). Rotating to next key."
+                    f"Key {current_key_index} exceeded quota (429). Penalized for {reset_after}s. Rotating..."
                 )
                 await response.aclose()
-                current_key_index = (current_key_index + 1) % len(OLLAMA_API_KEYS)
                 continue
 
             # Capture rate limit headers
@@ -801,7 +958,6 @@ async def _handle_proxy(
             if attempt == len(OLLAMA_API_KEYS) - 1:
                 raise HTTPException(status_code=500, detail=str(e))
             print(f"Request failed with error: {e}. Retrying with next key.")
-            current_key_index = (current_key_index + 1) % len(OLLAMA_API_KEYS)
 
     raise HTTPException(status_code=429, detail="All API keys have exceeded quota")
 
