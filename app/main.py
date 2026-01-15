@@ -9,7 +9,7 @@ from typing import List, Optional
 import httpx
 import yaml
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 app = FastAPI()
 
@@ -265,6 +265,217 @@ async def get_stats():
             return [dict(row) for row in rows]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving stats: {str(e)}")
+
+
+@app.get("/queries")
+async def get_queries(
+    limit: int = 50,
+    offset: int = 0,
+    ip: Optional[str] = None,
+    model: Optional[str] = None,
+):
+    """Returns individual query logs."""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            query = "SELECT * FROM requests WHERE 1=1"
+            params = []
+            if ip:
+                query += " AND client_ip = ?"
+                params.append(ip)
+            if model:
+                query += " AND model = ?"
+                params.append(model)
+            query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
+            rows = conn.execute(query, params).fetchall()
+            return [dict(row) for row in rows]
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error retrieving queries: {str(e)}"
+        )
+
+
+@app.get("/queries/{query_id}/body")
+async def get_query_body(query_id: int):
+    """Returns the raw request body for a query."""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT file_path FROM requests WHERE id = ?", (query_id,)
+            ).fetchone()
+            if not row or not row["file_path"]:
+                raise HTTPException(status_code=404, detail="Request body not found")
+
+            file_path = row["file_path"]
+            if not os.path.exists(file_path):
+                raise HTTPException(status_code=404, detail="File no longer exists")
+
+            with gzip.open(file_path, "rb") as f:
+                content = f.read()
+                try:
+                    return json.loads(content)
+                except:
+                    return {"raw": content.decode(errors="ignore")}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading body: {str(e)}")
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard():
+    """Serves a simple dashboard to view statistics and queries."""
+    html_content = """
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ollama Proxy Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body { background-color: #0f172a; color: #f8fafc; }
+        .card { background-color: #1e293b; border: 1px solid #334155; }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div class="max-w-7xl mx-auto">
+        <header class="mb-8 flex justify-between items-center">
+            <div>
+                <h1 class="text-3xl font-bold flex items-center gap-2">
+                    <i data-lucide="bar-chart-3" class="text-blue-400"></i>
+                    Ollama Proxy Dashboard
+                </h1>
+                <p class="text-slate-400">Monitoring and Usage Statistics</p>
+            </div>
+            <div class="flex gap-4">
+                <button onclick="loadStats()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg flex items-center gap-2 transition">
+                    <i data-lucide="refresh-cw" size="18"></i> Refresh
+                </button>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
+            <div class="card rounded-xl p-6">
+                <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
+                    <i data-lucide="activity"></i> Aggregated Stats
+                </h2>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm text-left">
+                        <thead class="text-xs uppercase bg-slate-800 text-slate-300">
+                            <tr>
+                                <th class="px-4 py-2">Date/Hour</th>
+                                <th class="px-4 py-2">IP</th>
+                                <th class="px-4 py-2">Model</th>
+                                <th class="px-4 py-2 text-right">Reqs</th>
+                                <th class="px-4 py-2 text-right">Tokens</th>
+                            </tr>
+                        </thead>
+                        <tbody id="stats-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card rounded-xl p-6">
+                <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
+                    <i data-lucide="list"></i> Recent Queries
+                </h2>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm text-left">
+                        <thead class="text-xs uppercase bg-slate-800 text-slate-300">
+                            <tr>
+                                <th class="px-4 py-2">Timestamp</th>
+                                <th class="px-4 py-2">IP</th>
+                                <th class="px-4 py-2">Model</th>
+                                <th class="px-4 py-2">Tokens</th>
+                                <th class="px-4 py-2 text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="queries-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div id="body-viewer" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+            <div class="card w-full max-w-4xl max-h-[80vh] rounded-2xl p-6 flex flex-col">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-xl font-bold">Request Body</h3>
+                    <button onclick="closeViewer()" class="text-slate-400 hover:text-white">
+                        <i data-lucide="x"></i>
+                    </button>
+                </div>
+                <pre id="body-content" class="bg-slate-900 p-4 rounded-lg overflow-auto text-xs text-green-400 flex-1 font-mono"></pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function loadStats() {
+            try {
+                const [statsRes, queriesRes] = await Promise.all([
+                    fetch('/stats'),
+                    fetch('/queries')
+                ]);
+                const stats = await statsRes.json();
+                const queries = await queriesRes.json();
+
+                const statsBody = document.getElementById('stats-body');
+                statsBody.innerHTML = stats.map(s => `
+                    <tr class="border-b border-slate-700 hover:bg-slate-800/50">
+                        <td class="px-4 py-3">${s.date} ${s.hour}:00</td>
+                        <td class="px-4 py-3 text-slate-400">${s.client_ip}</td>
+                        <td class="px-4 py-3 font-mono">${s.model}</td>
+                        <td class="px-4 py-3 text-right">${s.requests}</td>
+                        <td class="px-4 py-3 text-right text-blue-400">${s.prompt_tokens + s.completion_tokens}</td>
+                    </tr>
+                `).join('');
+
+                const queriesBody = document.getElementById('queries-body');
+                queriesBody.innerHTML = queries.map(q => `
+                    <tr class="border-b border-slate-700 hover:bg-slate-800/50">
+                        <td class="px-4 py-3 whitespace-nowrap">${q.timestamp}</td>
+                        <td class="px-4 py-3 text-slate-400">${q.client_ip}</td>
+                        <td class="px-4 py-3 font-mono">${q.model}</td>
+                        <td class="px-4 py-3 text-blue-400">${q.prompt_tokens + q.completion_tokens}</td>
+                        <td class="px-4 py-3 text-right">
+                            <button onclick="viewBody(${q.id})" class="text-blue-400 hover:underline">View</button>
+                        </td>
+                    </tr>
+                `).join('');
+
+                lucide.createIcons();
+            } catch (err) {
+                console.error("Failed to load dashboard data", err);
+            }
+        }
+
+        async function viewBody(id) {
+            try {
+                const res = await fetch(\`/queries/\${id}/body\`);
+                const data = await res.json();
+                document.getElementById('body-content').textContent = JSON.stringify(data, null, 2);
+                document.getElementById('body-viewer').classList.remove('hidden');
+            } catch (err) {
+                alert("Failed to load body");
+            }
+        }
+
+        function closeViewer() {
+            document.getElementById('body-viewer').classList.add('hidden');
+        }
+
+        loadStats();
+        // Refresh every minute
+        setInterval(loadStats, 60000);
+    </script>
+</body>
+</html>
+    """
+    return HTMLResponse(content=html_content)
 
 
 @app.get("/ratelimits")
