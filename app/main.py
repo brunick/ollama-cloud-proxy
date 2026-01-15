@@ -377,23 +377,23 @@ async def check_keys_health(authorization: Optional[str] = Header(None)):
 
 
 @app.get("/stats/minute")
-async def get_minute_stats():
-    """Returns token usage aggregated by minute for the last 60 minutes."""
+async def get_minute_stats(window: int = 60):
+    """Returns token usage aggregated by minute for the last 'window' minutes."""
     try:
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
-            # Use current_timestamp - 60 minutes
+            # Use current_timestamp - window minutes
             query = """
                 SELECT
                     strftime('%H:%M', timestamp) as minute,
                     model,
                     SUM(prompt_tokens + completion_tokens) as total_tokens
                 FROM usage
-                WHERE timestamp >= datetime('now', '-60 minutes', 'localtime')
+                WHERE timestamp >= datetime('now', ?, 'localtime')
                 GROUP BY minute, model
                 ORDER BY minute ASC
             """
-            rows = conn.execute(query).fetchall()
+            rows = conn.execute(query, (f"-{window} minutes",)).fetchall()
             return [dict(row) for row in rows]
     except Exception as e:
         raise HTTPException(
@@ -538,10 +538,19 @@ async def dashboard():
         </div>
 
         <div class="card rounded-xl p-6 mb-8">
-
-            <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
-                <i data-lucide="line-chart"></i> Token Usage (Last 60 Minutes)
-            </h2>
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4">
+                <h2 class="text-xl font-semibold flex items-center gap-2">
+                    <i data-lucide="line-chart"></i> Token Usage
+                </h2>
+                <div class="flex items-center gap-2 bg-slate-800 p-1 rounded-lg border border-slate-700">
+                    <button onclick="setTimeRange(60)" id="btn-60" class="time-range-btn px-3 py-1 rounded-md text-xs font-medium transition bg-blue-600 text-white">60m</button>
+                    <button onclick="setTimeRange(120)" id="btn-120" class="time-range-btn px-3 py-1 rounded-md text-xs font-medium transition text-slate-400 hover:text-white">2h</button>
+                    <button onclick="setTimeRange(240)" id="btn-240" class="time-range-btn px-3 py-1 rounded-md text-xs font-medium transition text-slate-400 hover:text-white">4h</button>
+                    <button onclick="setTimeRange(360)" id="btn-360" class="time-range-btn px-3 py-1 rounded-md text-xs font-medium transition text-slate-400 hover:text-white">6h</button>
+                    <button onclick="setTimeRange(720)" id="btn-720" class="time-range-btn px-3 py-1 rounded-md text-xs font-medium transition text-slate-400 hover:text-white">12h</button>
+                    <button onclick="setTimeRange(1440)" id="btn-1440" class="time-range-btn px-3 py-1 rounded-md text-xs font-medium transition text-slate-400 hover:text-white">24h</button>
+                </div>
+            </div>
             <div class="h-64 w-full">
                 <canvas id="usageChart"></canvas>
             </div>
@@ -605,13 +614,26 @@ async def dashboard():
     <script>
         let usageChart = null;
         let sparklineChart = null;
+        let currentTimeRange = 60;
+
+        function setTimeRange(minutes) {
+            currentTimeRange = minutes;
+            document.querySelectorAll('.time-range-btn').forEach(btn => {
+                btn.classList.remove('bg-blue-600', 'text-white');
+                btn.classList.add('text-slate-400', 'hover:text-white');
+            });
+            const activeBtn = document.getElementById(`btn-${minutes}`);
+            activeBtn.classList.add('bg-blue-600', 'text-white');
+            activeBtn.classList.remove('text-slate-400', 'hover:text-white');
+            loadStats();
+        }
 
         async function loadStats() {
             try {
                 const [statsRes, queriesRes, minuteRes, keysRes, dailyRes] = await Promise.all([
                     fetch('/stats'),
                     fetch('/queries'),
-                    fetch('/stats/minute'),
+                    fetch(`/stats/minute?window=${currentTimeRange}`),
                     fetch('/health/keys'),
                     fetch('/stats/24h')
                 ]);
@@ -705,13 +727,20 @@ async def dashboard():
 
             const totalData = [];
             const now = new Date();
+            const step = Math.max(1, Math.floor(currentTimeRange / 60)); // Show fewer points for longer ranges if needed, but here we keep minutes
 
-            for (let i = 59; i >= 0; i--) {
+            for (let i = currentTimeRange - 1; i >= 0; i--) {
                 const d = new Date(now.getTime() - i * 60000);
-                // Try both UTC and Local to be safe with server config
                 const timeStrLocal = d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
                 const timeStrUTC = d.getUTCHours().toString().padStart(2, '0') + ':' + d.getUTCMinutes().toString().padStart(2, '0');
-                labels.push(timeStrLocal);
+
+                // Only push label for every nth minute depending on range to keep x-axis clean
+                const labelFreq = currentTimeRange <= 120 ? 10 : (currentTimeRange <= 360 ? 30 : 60);
+                if (i % labelFreq === 0 || i === currentTimeRange - 1 || i === 0) {
+                    labels.push(timeStrLocal);
+                } else {
+                    labels.push("");
+                }
 
                 let minuteTotal = 0;
                 models.forEach((model, idx) => {
@@ -768,11 +797,11 @@ async def dashboard():
                                 title: { display: true, text: 'Tokens (Stacked)', color: '#64748b' }
                             },
                             yTotal: {
-                                display: false, // Hidden but provides the scale for the total line
+                                display: false,
                                 stacked: false,
                                 beginAtZero: true,
-                                // Sync this with y axis scale
-                                suggestMax: Math.max(...totalData) * 1.1
+                                // Sync this with y axis scale to ensure total line is visible
+                                max: Math.max(...totalData) * 1.1
                             },
                             x: {
                                 grid: { display: false },
