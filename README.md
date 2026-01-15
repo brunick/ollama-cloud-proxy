@@ -1,16 +1,21 @@
 # Ollama Cloud Proxy
 
-Dieser Proxy leitet Anfragen an die offizielle Ollama Cloud API (`https://ollama.com/api`) weiter. Er nutzt den offiziellen API-Key zur Authentifizierung und bietet eine zusätzliche Sicherheitsschicht, um den Proxy selbst abzusichern.
+Dieser Proxy leitet Anfragen an die offizielle Ollama Cloud API (`https://ollama.com/api`) weiter. Er bietet intelligentes Load-Balancing, Key-Rotation und ein detailliertes Dashboard zur Überwachung der Nutzung.
+
+![Dashboard](assets/dashboard.png)
 
 ## Features
 
-- **Multi-Key Rotation**: Unterstützt mehrere API-Keys und wechselt automatisch bei einem `429 Too Many Requests` (Quota exceeded) zum nächsten Key.
-- **Nutzungsstatistik**: Speichert Token-Verbrauch und Modell-Nutzung stündlich in einer SQLite-Datenbank.
-- **API-Key Integration**: Nutzt `OLLAMA_API_KEYS` für die Kommunikation mit der Cloud.
-- **Proxy Protection**: Optionaler `PROXY_AUTH_TOKEN`, um unbefugten Zugriff auf deinen Proxy zu verhindern.
-- **Optionaler Schutz**: Kann über `ALLOW_UNAUTHENTICATED_ACCESS` auch ohne Token betrieben werden.
-- **Streaming Support**: Unterstützt Streaming-Antworten (z.B. für Chat-Interfaces).
-- **OpenAI & Ollama Kompatibilität**: Unterstützt Pfade mit und ohne `/api` Präfix (z.B. `/api/generate` oder `/generate`).
+- **🚀 Smart Load-Balancing**: Verteilt Anfragen automatisch auf verfügbare API-Keys basierend auf der geringsten Nutzung in den letzten 2 Stunden.
+- **🔄 Automatische Key-Rotation**: Erkennt `429 Too Many Requests` Fehler (Quota exceeded) und wiederholt den Request intern sofort mit einem anderen verfügbaren Key.
+- **📊 Echtzeit-Dashboard**: Integriertes Web-Interface zur Überwachung von Token-Verbrauch, Key-Status und Request-Logs.
+- **📈 Nutzungsstatistiken**:
+  - Gesamt-Token-Counter (letzte 24h) mit stündlichem Sparkline-Graph.
+  - Detaillierter Token-Usage-Graph mit konfigurierbaren Zeitfenstern (60m, 2h, 4h, 6h, 12h, 24h).
+  - Gestapelte Ansicht nach Modellen und Summenlinie.
+- **🛡️ Proxy Protection**: Optionaler `PROXY_AUTH_TOKEN`, um unbefugten Zugriff auf deinen Proxy zu verhindern.
+- **🌍 Timezone Support**: Alle Statistiken werden automatisch in der lokalen Zeitzone des Nutzers angezeigt (UTC-Backend).
+- **📝 Request Logging**: Speichert Request-Bodies (komprimiert) für Debugging-Zwecke (einsehbar im Dashboard).
 
 ## Setup
 
@@ -21,7 +26,6 @@ Dieser Proxy leitet Anfragen an die offizielle Ollama Cloud API (`https://ollama
    Du kannst mehrere Keys über eine Konfigurationsdatei oder eine Umgebungsvariable angeben:
 
    **Option A: `config/config.yaml` (Empfohlen)**
-   Erstelle die Datei im Projektordner:
    ```yaml
    keys:
      - "key_1"
@@ -36,112 +40,48 @@ Dieser Proxy leitet Anfragen an die offizielle Ollama Cloud API (`https://ollama
 
    ### Weitere Optionen
    ```env
-   # Option A: Abgesichert (empfohlen)
    PROXY_AUTH_TOKEN=ein_geheimes_passwort_fuer_lokal
-   ALLOW_UNAUTHENTICATED_ACCESS=false
-   
-   # Option B: Offen (kein Token nötig)
-   ALLOW_UNAUTHENTICATED_ACCESS=true
+   ALLOW_UNAUTHENTICATED_ACCESS=false # Wenn true, wird kein Token benötigt
    ```
-   *Deinen API-Key findest du unter [ollama.com/settings/api-keys](https://ollama.com/settings/api-keys).*
 
 2. **Container starten**:
    ```bash
    docker-compose up -d --build
    ```
 
-### Vollständiges Docker Compose Beispiel
+## Monitoring & Dashboard
 
-Hier ist ein Beispiel für eine `docker-compose.yml`, die alle neuen Funktionen (Volumes für Config und Statistiken) nutzt:
+Das Dashboard ist standardmäßig unter `http://localhost:11434/dashboard` erreichbar.
 
-```yaml
-services:
-  ollama-cloud-proxy:
-    image: git.n1c.lol/nyze.one/ollama-cloud-proxy:latest
-    container_name: ollama-proxy
-    ports:
-      - "11434:11434"
-    environment:
-      # Falls du nur einen Key nutzt (sonst config/config.yaml nutzen):
-      - OLLAMA_API_KEY=dein_ollama_cloud_key
-      # Absicherung des Proxys nach außen:
-      - PROXY_AUTH_TOKEN=mein_geheimer_proxy_token
-      - ALLOW_UNAUTHENTICATED_ACCESS=false
-    volumes:
-      - ./config:/app/config  # Hier liegen deine API-Keys (config.yaml)
-      - ./data:/app/data      # Hier wird die Statistik-DB (usage.db) gespeichert
-    restart: always
-```
+### Key Features im Dashboard:
+- **Key Status**: Live-Status jedes Keys inklusive aktueller Penalty-Box Informationen (bei Rate-Limits).
+- **Token Counter**: Schnellübersicht der letzten 24h inklusive Trend-Analyse.
+- **Recent Queries**: Live-Ansicht der letzten Anfragen mit der Möglichkeit, den Request-Body einzusehen.
+- **Aggregated Stats**: Stündlich aggregierte Daten nach Modell und IP-Adresse.
+
+## API Endpunkte
+
+- `/{path:path}`: Transparentes Proxying zur Ollama Cloud.
+- `/dashboard`: Web-Interface.
+- `/stats`: Stündlich aggregierte Statistiken (JSON).
+- `/stats/minute`: Minütliche Statistiken für Charts (JSON).
+- `/stats/24h`: Zusammenfassung der letzten 24 Stunden.
+- `/health/keys`: Detaillierter Gesundheitszustand aller API-Keys.
 
 ## Nutzung
 
-Der Proxy ist unter `http://localhost:11434` erreichbar.
-
-### Beispiel mit Authentifizierung
-
-Wenn `ALLOW_UNAUTHENTICATED_ACCESS=false` gesetzt ist:
+Der Proxy verhält sich wie eine lokale Ollama-Instanz.
 
 ```bash
-curl http://localhost:11434/api/generate \
-  -H "Authorization: Bearer dein_geheimes_passwort_fuer_lokal" \
+curl http://localhost:11434/v1/chat/completions \
+  -H "Authorization: Bearer dein_proxy_token" \
   -d '{
     "model": "llama3",
-    "prompt": "Warum ist der Himmel blau?",
-    "stream": false
+    "messages": [{"role": "user", "content": "Hallo!"}]
   }'
 ```
 
-### Beispiel ohne Authentifizierung
-
-Wenn `ALLOW_UNAUTHENTICATED_ACCESS=true` gesetzt ist:
-
-```bash
-curl http://localhost:11434/api/generate \
-  -d '{
-    "model": "llama3",
-    "prompt": "Warum ist der Himmel blau?",
-    "stream": false
-  }'
-```
-
-## Monitoring & Statistiken
-
-Der Proxy trackt automatisch die Nutzung der API-Keys und die verbrauchten Token.
-
-### Nutzungsstatistik abrufen (`/stats`)
-
-Gibt eine stündliche Zusammenfassung nach Key und Modell zurück:
-
-```bash
-curl http://localhost:11434/stats
-```
-
-Beispiel-Antwort:
-```json
-[
-  {
-    "date": "2024-05-22",
-    "hour": "14",
-    "client_ip": "192.168.1.50",
-    "key_index": 0,
-    "model": "llama3:8b",
-    "requests": 15,
-    "prompt_tokens": 1250,
-    "completion_tokens": 4500
-  }
-]
-```
-
-### Health-Check (`/`)
-
-Der `/` Endpunkt liefert neben dem Status auch eine Gesamtsumme der bisherigen Nutzung.
-
-### Key-Rotation Details
-- Wenn die Ollama Cloud API mit einem Status `429` (Quota exceeded) antwortet, rotiert der Proxy intern zum nächsten verfügbaren Key.
-- Die ursprüngliche Anfrage wird automatisch mit dem neuen Key wiederholt.
-- Der aktuell gewählte Key bleibt für nachfolgende Anfragen aktiv, bis auch dieser sein Limit erreicht.
-
-### Sicherheit
-- Der Proxy leitet alle Pfade intelligent an `https://ollama.com/api` weiter (entfernt doppelte `/api` Präfixe automatisch).
-- Wenn die Authentifizierung aktiv ist, werden Anfragen ohne gültigen `PROXY_AUTH_TOKEN` mit `401 Unauthorized` abgelehnt.
-- Es werden keine lokalen Modelle gespeichert; alles läuft über die Cloud-Infrastruktur von Ollama.
+## Sicherheit
+- Der Proxy leitet alle Pfade intelligent weiter (entfernt doppelte `/api` oder `/v1` Präfixe automatisch).
+- Request-Bodies werden lokal in `data/requests` als GZIP gespeichert.
+- Die Datenbank `usage.db` befindet sich im `data` Ordner.

@@ -1,0 +1,25 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Data and SQLite databases
+data/
+*.db
+*.db-journal
+
+# Environment variables
+.env
+
+# Configuration with sensitive keys
+config/*.yaml
+!config/config.template.yaml
+
+# IDE and System files
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Docker logs
+logs/
