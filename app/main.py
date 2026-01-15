@@ -1,6 +1,7 @@
 # To check key health externally, use:
 # curl -H "Authorization: Bearer $PROXY_AUTH_TOKEN" http://localhost:11434/health/keys
 
+import asyncio
 import gzip
 import json
 import os
@@ -369,20 +370,20 @@ async def reset_key_penalty(
     return {"status": "reset", "key_index": key_index}
 
 
-@app.get("/health/keys")
-async def check_keys_health(authorization: Optional[str] = Header(None)):
-    """Manually trigger a health check for all keys."""
-    await verify_auth(authorization)
-
+async def perform_keys_health_check(force_all: bool = False):
+    """
+    Internal logic to check keys.
+    If force_all is False, it only checks keys that are not currently penalized
+    or whose penalty has expired.
+    """
     results = {}
     now = time.time()
     async with httpx.AsyncClient(timeout=10.0) as client:
         for i, key in enumerate(OLLAMA_API_KEYS):
-            # Check if we should perform a health check
-            # We check if key is NOT penalized, OR if the penalty time has expired
+            # Check if we should perform a health check for this key
             is_penalized = i in key_penalty_box and key_penalty_box[i] > now
 
-            if is_penalized:
+            if is_penalized and not force_all:
                 results[f"key_{i}"] = {
                     "status": "penalized",
                     "penalty_active": True,
@@ -401,7 +402,7 @@ async def check_keys_health(authorization: Optional[str] = Header(None)):
 
                 if response.status_code == 200:
                     status = "ok"
-                    # Reset backoff on success if it was previously penalized
+                    # Reset backoff on success
                     if i in key_penalty_box:
                         del key_penalty_box[i]
                     if i in key_backoff_levels:
@@ -442,6 +443,31 @@ async def check_keys_health(authorization: Optional[str] = Header(None)):
                 results[key_id]["usage_2h"] = row["usage"]
 
     return results
+
+
+@app.get("/health/keys")
+async def check_keys_health(authorization: Optional[str] = Header(None)):
+    """Manually trigger a health check for all keys."""
+    await verify_auth(authorization)
+    return await perform_keys_health_check(force_all=True)
+
+
+async def background_health_worker():
+    """Background task that periodically re-tests keys that are ready."""
+    print("Background Health Worker started.")
+    while True:
+        try:
+            # Re-test keys whose penalty has expired
+            await perform_keys_health_check(force_all=False)
+        except Exception as e:
+            print(f"Background worker error: {e}")
+        await asyncio.sleep(60)
+
+
+@app.on_event("startup")
+async def startup_event():
+    # Start the background health worker
+    asyncio.create_task(background_health_worker())
 
 
 @app.get("/stats/minute")
