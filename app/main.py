@@ -385,7 +385,7 @@ async def perform_keys_health_check(force_all: bool = False):
 
             if is_penalized and not force_all:
                 results[f"key_{i}"] = {
-                    "status": "penalized",
+                    "status": "⏳ PENALIZED",
                     "penalty_active": True,
                     "expires_in": int(key_penalty_box[i] - now),
                     "backoff_level": key_backoff_levels.get(i, 0),
@@ -401,21 +401,21 @@ async def perform_keys_health_check(force_all: bool = False):
                 )
 
                 if response.status_code == 200:
-                    status = "ok"
+                    status = "✅ OK"
                     # Reset backoff on success
                     if i in key_penalty_box:
                         del key_penalty_box[i]
                     if i in key_backoff_levels:
                         del key_backoff_levels[i]
                 elif response.status_code == 429:
-                    status = "penalized_429"
+                    status = "🚫 RATE LIMITED"
                     # Increase backoff level
                     current_level = key_backoff_levels.get(i, -1) + 1
                     level = min(current_level, len(BACKOFF_STAGES) - 1)
                     key_backoff_levels[i] = level
                     key_penalty_box[i] = now + BACKOFF_STAGES[level]
                 else:
-                    status = f"error_{response.status_code}"
+                    status = f"❌ ERROR {response.status_code}"
 
                 results[f"key_{i}"] = {
                     "status": status,
@@ -427,7 +427,7 @@ async def perform_keys_health_check(force_all: bool = False):
                     "usage_2h": 0,
                 }
             except Exception as e:
-                results[f"key_{i}"] = {"status": "unreachable", "error": str(e)}
+                results[f"key_{i}"] = {"status": "📡 OFFLINE", "error": str(e)}
 
     # Add usage info
     with sqlite3.connect(DB_PATH) as conn:
@@ -751,7 +751,7 @@ async def dashboard():
                 keysContainer.innerHTML = Object.entries(keysData).map(([keyId, info]) => {
                     const idx = keyId.split('_')[1];
                     const isPenalized = info.penalty_active;
-                    const statusColor = isPenalized ? 'text-red-400' : (info.status === 'ok' ? 'text-green-400' : 'text-yellow-400');
+                    const statusColor = isPenalized ? 'text-red-400' : (info.status.includes('OK') ? 'text-green-400' : 'text-yellow-400');
 
                     let penaltyInfo = '';
                     if (isPenalized || info.backoff_level > 0) {
