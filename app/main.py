@@ -797,11 +797,11 @@ async def dashboard():
                                 title: { display: true, text: 'Tokens (Stacked)', color: '#64748b' }
                             },
                             yTotal: {
-                                display: false, // Hidden but provides the scale for the total line
+                                display: false,
                                 stacked: false,
                                 beginAtZero: true,
-                                // Sync this with y axis scale
-                                suggestMax: Math.max(...totalData) * 1.1
+                                // Sync this with y axis scale to ensure total line is visible
+                                max: Math.max(...totalData) * 1.1
                             },
                             x: {
                                 grid: { display: false },
