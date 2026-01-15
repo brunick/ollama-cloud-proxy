@@ -322,8 +322,7 @@ async def get_stats():
             # Aggregate by date, hour, key_index, and model
             query = """
                 SELECT
-                    strftime('%Y-%m-%d', timestamp, 'localtime') as date,
-                    strftime('%H', timestamp, 'localtime') as hour,
+                    strftime('%Y-%m-%dT%H:00:00Z', timestamp) as bucket,
                     client_ip,
                     key_index,
                     model,
@@ -400,11 +399,11 @@ async def get_minute_stats(window: int = 60):
             # Use current_timestamp - window minutes
             query = """
                 SELECT
-                    strftime('%Y-%m-%d %H:%M', timestamp, 'localtime') as minute,
+                    strftime('%Y-%m-%dT%H:%M:00Z', timestamp) as minute,
                     model,
                     SUM(prompt_tokens + completion_tokens) as total_tokens
                 FROM usage
-                WHERE timestamp >= datetime('now', ?, 'localtime')
+                WHERE timestamp >= datetime('now', ?)
                 GROUP BY minute, model
                 ORDER BY minute ASC
             """
@@ -424,10 +423,10 @@ async def get_24h_stats():
             conn.row_factory = sqlite3.Row
             query = """
                 SELECT
-                    strftime('%Y-%m-%d %H:00', timestamp, 'localtime') as hour_bucket,
+                    strftime('%Y-%m-%dT%H:00:00Z', timestamp) as hour_bucket,
                     SUM(prompt_tokens + completion_tokens) as total_tokens
                 FROM usage
-                WHERE timestamp >= datetime('now', '-24 hours', 'localtime')
+                WHERE timestamp >= datetime('now', '-24 hours')
                 GROUP BY hour_bucket
                 ORDER BY hour_bucket ASC
             """
@@ -657,7 +656,6 @@ async def dashboard():
                 const minuteData = await minuteRes.json();
                 const keysData = await keysRes.json();
                 const dailyData = await dailyRes.json();
-                console.log("Minute data from server:", minuteData);
 
                 const keysContainer = document.getElementById('keys-container');
                 keysContainer.innerHTML = Object.entries(keysData).map(([keyId, info]) => {
@@ -681,24 +679,31 @@ async def dashboard():
                 if (stats.length === 0) {
                     statsBody.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-slate-500">No statistics available yet</td></tr>';
                 } else {
-                    statsBody.innerHTML = stats.map(s => `
+                    statsBody.innerHTML = stats.map(s => {
+                        const localTime = new Date(s.bucket).toLocaleString();
+                        return `
                         <tr class="border-b border-slate-700 hover:bg-slate-800/50">
-                            <td class="px-4 py-3">${s.date} ${s.hour}:00</td>
+                            <td class="px-4 py-3">${localTime}</td>
                             <td class="px-4 py-3 text-slate-400">${s.client_ip}</td>
                             <td class="px-4 py-3 font-mono">${s.model}</td>
                             <td class="px-4 py-3 text-right">${s.requests}</td>
                             <td class="px-4 py-3 text-right text-blue-400">${s.prompt_tokens + s.completion_tokens}</td>
                         </tr>
-                    `).join('');
+                        `;
+                    }).join('');
                 }
 
                 const queriesBody = document.getElementById('queries-body');
                 if (queries.length === 0) {
                     queriesBody.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-slate-500">No queries found</td></tr>';
                 } else {
-                    queriesBody.innerHTML = queries.map(q => `
+                    queriesBody.innerHTML = queries.map(q => {
+                        // DB timestamp is CURRENT_TIMESTAMP (UTC), but SQLite doesn't append 'Z'
+                        const timestamp = q.timestamp.includes('Z') ? q.timestamp : q.timestamp + 'Z';
+                        const localTime = new Date(timestamp).toLocaleString();
+                        return `
                         <tr class="border-b border-slate-700 hover:bg-slate-800/50">
-                            <td class="px-4 py-3 whitespace-nowrap">${q.timestamp}</td>
+                            <td class="px-4 py-3 whitespace-nowrap">${localTime}</td>
                             <td class="px-4 py-3 text-slate-400">${q.client_ip}</td>
                             <td class="px-4 py-3 font-mono">${q.model}</td>
                             <td class="px-4 py-3 text-blue-400">${q.prompt_tokens + q.completion_tokens}</td>
@@ -706,7 +711,8 @@ async def dashboard():
                                 <button onclick="viewBody(${q.id})" class="text-blue-400 hover:underline">View</button>
                             </td>
                         </tr>
-                    `).join('');
+                        `;
+                    }).join('');
                 }
 
                 updateChart(minuteData);
@@ -747,18 +753,12 @@ async def dashboard():
             for (let i = currentTimeRange - 1; i >= 0; i--) {
                 const d = new Date(now.getTime() - i * 60000);
 
-                // For matching with the backend (YYYY-MM-DD HH:MM)
-                const year = d.getFullYear();
-                const month = (d.getMonth() + 1).toString().padStart(2, '0');
-                const day = d.getDate().toString().padStart(2, '0');
-                const hours = d.getHours().toString().padStart(2, '0');
-                const minutes = d.getMinutes().toString().padStart(2, '0');
-                const fullKeyLocal = `${year}-${month}-${day} ${hours}:${minutes}`;
+                // Construct ISO string for matching (YYYY-MM-DDTHH:MM:00Z)
+                const isoStr = d.toISOString().substring(0, 16) + ":00Z";
 
-                // For display labels
-                const timeStrDisplay = hours + ':' + minutes;
+                // For display labels in local time
+                const timeStrDisplay = d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
 
-                // Only push label for every nth minute depending on range to keep x-axis clean
                 const labelFreq = currentTimeRange <= 120 ? 10 : (currentTimeRange <= 360 ? 30 : 60);
                 if (i % labelFreq === 0 || i === currentTimeRange - 1 || i === 0) {
                     labels.push(timeStrDisplay);
@@ -768,8 +768,7 @@ async def dashboard():
 
                 let minuteTotal = 0;
                 models.forEach((model, idx) => {
-                    // Match using the unique YYYY-MM-DD HH:MM string
-                    const entry = data.find(e => e.minute === fullKeyLocal && e.model === model);
+                    const entry = data.find(e => e.minute === isoStr && e.model === model);
                     const val = entry ? entry.total_tokens : 0;
                     modelDatasets[idx].data.push(val);
                     minuteTotal += val;
@@ -854,7 +853,7 @@ async def dashboard():
             document.getElementById('total-tokens-count').textContent = total.toLocaleString();
 
             const ctx = document.getElementById('sparklineChart').getContext('2d');
-            const labels = data.map(d => d.hour_bucket);
+            const labels = data.map(d => new Date(d.hour_bucket).toLocaleString());
             const values = data.map(d => d.total_tokens);
 
             if (sparklineChart) {
@@ -943,8 +942,6 @@ async def _handle_proxy(
     content = await request.body() if request else None
     params = request.query_params if request else None
 
-    client = httpx.AsyncClient(timeout=None)
-
     # Get client IP, considering potential proxies
     if request:
         client_ip = request.headers.get("X-Forwarded-For", request.client.host)
@@ -1015,85 +1012,90 @@ async def _handle_proxy(
             print(f"Logging error: {e}")
 
     # 3. Handle Streaming or normal response with retry logic for 429
-    # Start with the best key based on usage and penalty box
     attempted_indices = set()
+    last_exception = None
 
-    for attempt in range(len(OLLAMA_API_KEYS)):
-        # Pick the best key that hasn't been tried yet in this request
-        # We need to exclude attempted indices from the selection
-        available_indices = [
-            i for i in range(len(OLLAMA_API_KEYS)) if i not in attempted_indices
-        ]
-        if not available_indices:
-            break
+    async with httpx.AsyncClient(timeout=None) as client:
+        for attempt in range(len(OLLAMA_API_KEYS)):
+            available_indices = [
+                i for i in range(len(OLLAMA_API_KEYS)) if i not in attempted_indices
+            ]
+            if not available_indices:
+                break
 
-        # Re-evaluating best key among those not yet tried
-        current_key_index = get_best_key_index(exclude=attempted_indices)
+            current_key_index = get_best_key_index(exclude=attempted_indices)
+            if current_key_index is None or current_key_index in attempted_indices:
+                current_key_index = available_indices[0]
 
-        # Fallback if get_best_key_index doesn't support exclusion yet or fails
-        if current_key_index is None or current_key_index in attempted_indices:
-            current_key_index = available_indices[0]
+            attempted_indices.add(current_key_index)
+            current_key = OLLAMA_API_KEYS[current_key_index]
 
-        attempted_indices.add(current_key_index)
-        current_key = OLLAMA_API_KEYS[current_key_index]
-
-        headers = {
-            "Authorization": f"Bearer {current_key}",
-            "Content-Type": request.headers.get("Content-Type", "application/json")
-            if request
-            else "application/json",
-        }
-
-        try:
-            req = client.build_request(
-                method, url, content=content, params=params, headers=headers
-            )
-            response = await client.send(req, stream=True)
-
-            # If quota exceeded, put in penalty box and try next key
-            if response.status_code == 429 and len(OLLAMA_API_KEYS) > 1:
-                # Penalty for 5 minutes or based on reset header if available
-                reset_after = 300
-                if "x-ratelimit-reset" in response.headers:
-                    try:
-                        reset_after = int(response.headers["x-ratelimit-reset"])
-                    except:
-                        pass
-
-                key_penalty_box[current_key_index] = time.time() + reset_after
-                print(
-                    f"Key {current_key_index} exceeded quota (429). Penalized for {reset_after}s. Rotating..."
-                )
-                await response.aclose()
-                continue
-
-            # Capture rate limit headers
-            rl_headers = {
-                k.lower(): v
-                for k, v in response.headers.items()
-                if k.lower().startswith("x-ratelimit-")
+            headers = {
+                "Authorization": f"Bearer {current_key}",
+                "Content-Type": request.headers.get("Content-Type", "application/json")
+                if request
+                else "application/json",
             }
-            if rl_headers:
-                rate_limit_store[f"key_{current_key_index}"] = rl_headers
 
-            # If not a stream or if we want to parse it later, we need to handle it.
-            # But Ollama is mostly streaming or single JSON.
-            # We wrap the iterator to catch the usage data at the end.
-            return StreamingResponse(
-                log_stream_usage(
-                    response.aiter_raw(),
-                    current_key_index,
-                    client_ip,
-                    request_id,
-                ),
-                status_code=response.status_code,
-                headers=dict(response.headers),
-                background=None,
-            )
-        except Exception as e:
-            if attempt == len(OLLAMA_API_KEYS) - 1:
-                raise HTTPException(status_code=500, detail=str(e))
-            print(f"Request failed with error: {e}. Retrying with next key.")
+            try:
+                req = client.build_request(
+                    method, url, content=content, params=params, headers=headers
+                )
+                response = await client.send(req, stream=True)
+
+                # If quota exceeded, penalize and retry if possible
+                if response.status_code == 429:
+                    reset_after = 300
+                    if "x-ratelimit-reset" in response.headers:
+                        try:
+                            reset_after = int(response.headers["x-ratelimit-reset"])
+                        except:
+                            pass
+
+                    key_penalty_box[current_key_index] = time.time() + reset_after
+                    print(
+                        f"Key {current_key_index} (attempt {attempt + 1}) exceeded quota (429). Penalized for {reset_after}s."
+                    )
+
+                    if attempt < len(OLLAMA_API_KEYS) - 1:
+                        await response.aclose()
+                        continue
+                    # On last attempt, we must return the response (which is 429)
+
+                # Capture rate limit headers
+                rl_headers = {
+                    k.lower(): v
+                    for k, v in response.headers.items()
+                    if k.lower().startswith("x-ratelimit-")
+                }
+                if rl_headers:
+                    rate_limit_store[f"key_{current_key_index}"] = rl_headers
+
+                # Return the successful (or final 429) response
+                return StreamingResponse(
+                    log_stream_usage(
+                        response.aiter_raw(),
+                        current_key_index,
+                        client_ip,
+                        request_id,
+                    ),
+                    status_code=response.status_code,
+                    headers=dict(response.headers),
+                )
+            except Exception as e:
+                last_exception = e
+                print(f"Key {current_key_index} (attempt {attempt + 1}) failed: {e}")
+                if attempt < len(OLLAMA_API_KEYS) - 1:
+                    continue
+                break
+
+    # If we reached here, all attempts failed with exceptions or exhausted keys
+    error_detail = (
+        str(last_exception)
+        if last_exception
+        else "All API keys exhausted or rate-limited"
+    )
+    raise HTTPException(status_code=500, detail=error_detail)
 
     raise HTTPException(status_code=429, detail="All API keys have exceeded quota")
 
