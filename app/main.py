@@ -193,20 +193,35 @@ if not OLLAMA_API_KEYS:
     raise ValueError("No OLLAMA_API_KEYS found in config or environment variables")
 
 
-def get_best_key_index() -> int:
+def get_best_key_index(exclude: Optional[set] = None) -> int:
     """Find the best key index based on usage in the last 2 hours and penalty box."""
     now = time.time()
+    exclude = exclude or set()
 
-    # Filter out keys in penalty box
+    # Filter out keys in penalty box and excluded keys
     available_indices = [
         i
         for i in range(len(OLLAMA_API_KEYS))
-        if i not in key_penalty_box or key_penalty_box[i] < now
+        if (i not in key_penalty_box or key_penalty_box[i] < now) and i not in exclude
     ]
 
-    # If all keys are penalized, use the one that expires soonest
+    # If all keys are penalized or excluded, use the one that expires soonest (among non-excluded)
     if not available_indices:
-        return min(key_penalty_box, key=key_penalty_box.get)
+        remaining_non_excluded = [
+            i for i in range(len(OLLAMA_API_KEYS)) if i not in exclude
+        ]
+        if not remaining_non_excluded:
+            return None
+
+        penalized_non_excluded = {
+            i: key_penalty_box[i]
+            for i in remaining_non_excluded
+            if i in key_penalty_box
+        }
+        if not penalized_non_excluded:
+            return remaining_non_excluded[0]
+
+        return min(penalized_non_excluded, key=penalized_non_excluded.get)
 
     # If only one key available, return it
     if len(available_indices) == 1:
@@ -1005,17 +1020,19 @@ async def _handle_proxy(
 
     for attempt in range(len(OLLAMA_API_KEYS)):
         # Pick the best key that hasn't been tried yet in this request
-        current_key_index = get_best_key_index()
+        # We need to exclude attempted indices from the selection
+        available_indices = [
+            i for i in range(len(OLLAMA_API_KEYS)) if i not in attempted_indices
+        ]
+        if not available_indices:
+            break
 
-        # If the best key was already attempted (e.g. it just failed),
-        # fallback to any key not yet tried
-        if current_key_index in attempted_indices:
-            remaining = [
-                i for i in range(len(OLLAMA_API_KEYS)) if i not in attempted_indices
-            ]
-            if not remaining:
-                break
-            current_key_index = remaining[0]
+        # Re-evaluating best key among those not yet tried
+        current_key_index = get_best_key_index(exclude=attempted_indices)
+
+        # Fallback if get_best_key_index doesn't support exclusion yet or fails
+        if current_key_index is None or current_key_index in attempted_indices:
+            current_key_index = available_indices[0]
 
         attempted_indices.add(current_key_index)
         current_key = OLLAMA_API_KEYS[current_key_index]
