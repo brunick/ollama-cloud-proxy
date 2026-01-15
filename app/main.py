@@ -307,8 +307,8 @@ async def get_stats():
             # Aggregate by date, hour, key_index, and model
             query = """
                 SELECT
-                    strftime('%Y-%m-%d', timestamp) as date,
-                    strftime('%H', timestamp) as hour,
+                    strftime('%Y-%m-%d', timestamp, 'localtime') as date,
+                    strftime('%H', timestamp, 'localtime') as hour,
                     client_ip,
                     key_index,
                     model,
@@ -385,7 +385,7 @@ async def get_minute_stats(window: int = 60):
             # Use current_timestamp - window minutes
             query = """
                 SELECT
-                    strftime('%H:%M', timestamp) as minute,
+                    strftime('%Y-%m-%d %H:%M', timestamp, 'localtime') as minute,
                     model,
                     SUM(prompt_tokens + completion_tokens) as total_tokens
                 FROM usage
@@ -409,7 +409,7 @@ async def get_24h_stats():
             conn.row_factory = sqlite3.Row
             query = """
                 SELECT
-                    strftime('%Y-%m-%d %H:00', timestamp) as hour_bucket,
+                    strftime('%Y-%m-%d %H:00', timestamp, 'localtime') as hour_bucket,
                     SUM(prompt_tokens + completion_tokens) as total_tokens
                 FROM usage
                 WHERE timestamp >= datetime('now', '-24 hours', 'localtime')
@@ -731,20 +731,30 @@ async def dashboard():
 
             for (let i = currentTimeRange - 1; i >= 0; i--) {
                 const d = new Date(now.getTime() - i * 60000);
-                const timeStrLocal = d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
-                const timeStrUTC = d.getUTCHours().toString().padStart(2, '0') + ':' + d.getUTCMinutes().toString().padStart(2, '0');
+
+                // For matching with the backend (YYYY-MM-DD HH:MM)
+                const year = d.getFullYear();
+                const month = (d.getMonth() + 1).toString().padStart(2, '0');
+                const day = d.getDate().toString().padStart(2, '0');
+                const hours = d.getHours().toString().padStart(2, '0');
+                const minutes = d.getMinutes().toString().padStart(2, '0');
+                const fullKeyLocal = `${year}-${month}-${day} ${hours}:${minutes}`;
+
+                // For display labels
+                const timeStrDisplay = hours + ':' + minutes;
 
                 // Only push label for every nth minute depending on range to keep x-axis clean
                 const labelFreq = currentTimeRange <= 120 ? 10 : (currentTimeRange <= 360 ? 30 : 60);
                 if (i % labelFreq === 0 || i === currentTimeRange - 1 || i === 0) {
-                    labels.push(timeStrLocal);
+                    labels.push(timeStrDisplay);
                 } else {
                     labels.push("");
                 }
 
                 let minuteTotal = 0;
                 models.forEach((model, idx) => {
-                    const entry = data.find(e => (e.minute === timeStrLocal || e.minute === timeStrUTC) && e.model === model);
+                    // Match using the unique YYYY-MM-DD HH:MM string
+                    const entry = data.find(e => e.minute === fullKeyLocal && e.model === model);
                     const val = entry ? entry.total_tokens : 0;
                     modelDatasets[idx].data.push(val);
                     minuteTotal += val;
