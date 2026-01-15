@@ -21,6 +21,18 @@ app = FastAPI()
 rate_limit_store = {}
 # Penalty box for keys that returned 429: {key_index: expiration_timestamp}
 key_penalty_box: Dict[int, float] = {}
+# Track backoff levels for keys: {key_index: level_index}
+key_backoff_levels: Dict[int, int] = {}
+
+# Backoff stages in seconds: 15m, 1h, 2h, 6h, 12h, 24h
+BACKOFF_STAGES = [
+    15 * 60,  # 15 min
+    1 * 60 * 60,  # 1 hour
+    2 * 60 * 60,  # 2 hours
+    6 * 60 * 60,  # 6 hours
+    12 * 60 * 60,  # 12 hours
+    24 * 60 * 60,  # 24 hours
+]
 
 # Persistent HTTP client for streaming stability
 http_client = httpx.AsyncClient(timeout=None)
@@ -342,37 +354,76 @@ async def get_stats():
         raise HTTPException(status_code=500, detail=f"Error retrieving stats: {str(e)}")
 
 
+@app.post("/health/keys/{key_index}/reset")
+async def reset_key_penalty(
+    key_index: int, authorization: Optional[str] = Header(None)
+):
+    """Manually reset the penalty and backoff for a specific key."""
+    await verify_auth(authorization)
+
+    if key_index in key_penalty_box:
+        del key_penalty_box[key_index]
+    if key_index in key_backoff_levels:
+        del key_backoff_levels[key_index]
+
+    return {"status": "reset", "key_index": key_index}
+
+
 @app.get("/health/keys")
 async def check_keys_health(authorization: Optional[str] = Header(None)):
     """Manually trigger a health check for all keys."""
     await verify_auth(authorization)
 
     results = {}
+    now = time.time()
     async with httpx.AsyncClient(timeout=10.0) as client:
         for i, key in enumerate(OLLAMA_API_KEYS):
+            # Check if we should perform a health check
+            # We check if key is NOT penalized, OR if the penalty time has expired
+            is_penalized = i in key_penalty_box and key_penalty_box[i] > now
+
+            if is_penalized:
+                results[f"key_{i}"] = {
+                    "status": "penalized",
+                    "penalty_active": True,
+                    "expires_in": int(key_penalty_box[i] - now),
+                    "backoff_level": key_backoff_levels.get(i, 0),
+                    "usage_2h": 0,
+                }
+                continue
+
             try:
                 # Use a lightweight request to check key status
                 response = await client.get(
                     f"{OLLAMA_CLOUD_URL}/v1/models",
                     headers={"Authorization": f"Bearer {key}"},
                 )
-                status = (
-                    "ok"
-                    if response.status_code == 200
-                    else f"error_{response.status_code}"
-                )
 
-                if response.status_code == 429:
-                    # Put in penalty box for 5 minutes if 429 found
-                    key_penalty_box[i] = time.time() + 300
+                if response.status_code == 200:
+                    status = "ok"
+                    # Reset backoff on success if it was previously penalized
+                    if i in key_penalty_box:
+                        del key_penalty_box[i]
+                    if i in key_backoff_levels:
+                        del key_backoff_levels[i]
+                elif response.status_code == 429:
                     status = "penalized_429"
-                elif i in key_penalty_box and key_penalty_box[i] < time.time():
-                    del key_penalty_box[i]
+                    # Increase backoff level
+                    current_level = key_backoff_levels.get(i, -1) + 1
+                    level = min(current_level, len(BACKOFF_STAGES) - 1)
+                    key_backoff_levels[i] = level
+                    key_penalty_box[i] = now + BACKOFF_STAGES[level]
+                else:
+                    status = f"error_{response.status_code}"
 
                 results[f"key_{i}"] = {
                     "status": status,
-                    "penalty_active": i in key_penalty_box,
-                    "usage_2h": 0,  # Placeholder
+                    "penalty_active": i in key_penalty_box and key_penalty_box[i] > now,
+                    "expires_in": int(key_penalty_box[i] - now)
+                    if i in key_penalty_box
+                    else 0,
+                    "backoff_level": key_backoff_levels.get(i, 0),
+                    "usage_2h": 0,
                 }
             except Exception as e:
                 results[f"key_{i}"] = {"status": "unreachable", "error": str(e)}
@@ -672,17 +723,39 @@ async def dashboard():
 
                 const keysContainer = document.getElementById('keys-container');
                 keysContainer.innerHTML = Object.entries(keysData).map(([keyId, info]) => {
+                    const idx = keyId.split('_')[1];
                     const isPenalized = info.penalty_active;
                     const statusColor = isPenalized ? 'text-red-400' : (info.status === 'ok' ? 'text-green-400' : 'text-yellow-400');
+
+                    let penaltyInfo = '';
+                    if (isPenalized || info.backoff_level > 0) {
+                        const timeStr = info.expires_in > 0 ?
+                            (info.expires_in > 60 ? Math.ceil(info.expires_in/60) + 'm' : info.expires_in + 's') : 'Ready';
+                        penaltyInfo = `
+                            <div class="mt-2 pt-2 border-t border-slate-700/50">
+                                <div class="flex justify-between items-center text-[10px]">
+                                    <span class="text-slate-500 uppercase">Backoff Lvl ${info.backoff_level}</span>
+                                    <span class="text-orange-400 font-mono">${timeStr}</span>
+                                </div>
+                            </div>
+                        `;
+                    }
+
                     return `
-                        <div class="bg-slate-800/50 p-4 rounded-lg border ${isPenalized ? 'border-red-500/50' : 'border-slate-700'}">
+                        <div class="bg-slate-800/50 p-4 rounded-lg border ${isPenalized ? 'border-red-500/50' : 'border-slate-700'} transition-all">
                             <div class="flex justify-between items-start mb-2">
                                 <span class="font-bold text-slate-300">${keyId}</span>
-                                <span class="text-xs ${statusColor} px-2 py-0.5 rounded bg-slate-900">${info.status}</span>
+                                <div class="flex gap-2 items-center">
+                                    <button onclick="resetKey(${idx})" class="p-1 hover:bg-slate-700 rounded text-slate-500 hover:text-white transition" title="Reset Penalty">
+                                        <i data-lucide="rotate-ccw" size="12"></i>
+                                    </button>
+                                    <span class="text-xs ${statusColor} px-2 py-0.5 rounded bg-slate-900">${info.status}</span>
+                                </div>
                             </div>
                             <div class="text-xs text-slate-400">
                                 <div>Usage (2h): <span class="text-blue-400">${info.usage_2h.toLocaleString()}</span> tokens</div>
-                                ${isPenalized ? `<div class="text-red-400 mt-1 flex items-center gap-1"><i data-lucide="alert-circle" size="12"></i> Penalized (429)</div>` : ''}
+                                ${isPenalized ? `<div class="text-red-400 mt-1 flex items-center gap-1 font-medium"><i data-lucide="alert-circle" size="12"></i> Rate Limited</div>` : ''}
+                                ${penaltyInfo}
                             </div>
                         </div>
                     `;
@@ -847,6 +920,15 @@ async def dashboard():
                         }
                     }
                 });
+            }
+        }
+
+        async function resetKey(idx) {
+            try {
+                const res = await fetch(`/health/keys/${idx}/reset`, { method: 'POST' });
+                if (res.ok) loadStats();
+            } catch (err) {
+                console.error("Failed to reset key", err);
             }
         }
 
@@ -1057,16 +1139,24 @@ async def _handle_proxy(
 
             # If quota exceeded, penalize and retry if possible
             if response.status_code == 429:
-                reset_after = 300
+                now = time.time()
+                # Increase backoff level
+                current_level = key_backoff_levels.get(current_key_index, -1) + 1
+                level = min(current_level, len(BACKOFF_STAGES) - 1)
+                key_backoff_levels[current_key_index] = level
+
+                reset_after = BACKOFF_STAGES[level]
+                # Respect X-Ratelimit-Reset if it's LONGER than our backoff
                 if "x-ratelimit-reset" in response.headers:
                     try:
-                        reset_after = int(response.headers["x-ratelimit-reset"])
+                        header_reset = int(response.headers["x-ratelimit-reset"])
+                        reset_after = max(reset_after, header_reset)
                     except:
                         pass
 
-                key_penalty_box[current_key_index] = time.time() + reset_after
+                key_penalty_box[current_key_index] = now + reset_after
                 print(
-                    f"Key {current_key_index} (attempt {attempt + 1}) exceeded quota (429). Penalized for {reset_after}s."
+                    f"Key {current_key_index} (attempt {attempt + 1}) exceeded quota (429). Level {level}, Penalized for {reset_after}s."
                 )
 
                 if attempt < len(OLLAMA_API_KEYS) - 1:
