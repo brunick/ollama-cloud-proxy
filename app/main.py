@@ -574,19 +574,19 @@ async def dashboard():
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
-            <div class="card rounded-xl p-6">
-                <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
+            <div class="card rounded-xl p-6 flex flex-col h-[500px]">
+                <h2 class="text-xl font-semibold mb-4 flex items-center gap-2 flex-none">
                     <i data-lucide="activity"></i> Aggregated Stats
                 </h2>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-sm text-left">
-                        <thead class="text-xs uppercase bg-slate-800 text-slate-300">
+                <div class="overflow-auto flex-1">
+                    <table class="w-full text-sm text-left border-collapse">
+                        <thead class="text-xs uppercase bg-slate-800 text-slate-300 sticky top-0 z-10 shadow-sm">
                             <tr>
-                                <th class="px-4 py-2">Date/Hour</th>
-                                <th class="px-4 py-2">IP</th>
-                                <th class="px-4 py-2">Model</th>
-                                <th class="px-4 py-2 text-right">Reqs</th>
-                                <th class="px-4 py-2 text-right">Tokens</th>
+                                <th class="px-4 py-2 bg-slate-800">Date/Hour</th>
+                                <th class="px-4 py-2 bg-slate-800">IP</th>
+                                <th class="px-4 py-2 bg-slate-800">Model</th>
+                                <th class="px-4 py-2 text-right bg-slate-800">Reqs</th>
+                                <th class="px-4 py-2 text-right bg-slate-800">Tokens</th>
                             </tr>
                         </thead>
                         <tbody id="stats-body"></tbody>
@@ -594,19 +594,19 @@ async def dashboard():
                 </div>
             </div>
 
-            <div class="card rounded-xl p-6">
-                <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
+            <div class="card rounded-xl p-6 flex flex-col h-[500px]">
+                <h2 class="text-xl font-semibold mb-4 flex items-center gap-2 flex-none">
                     <i data-lucide="list"></i> Recent Queries
                 </h2>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-sm text-left">
-                        <thead class="text-xs uppercase bg-slate-800 text-slate-300">
+                <div class="overflow-auto flex-1">
+                    <table class="w-full text-sm text-left border-collapse">
+                        <thead class="text-xs uppercase bg-slate-800 text-slate-300 sticky top-0 z-10 shadow-sm">
                             <tr>
-                                <th class="px-4 py-2">Timestamp</th>
-                                <th class="px-4 py-2">IP</th>
-                                <th class="px-4 py-2">Model</th>
-                                <th class="px-4 py-2">Tokens</th>
-                                <th class="px-4 py-2 text-right">Action</th>
+                                <th class="px-4 py-2 bg-slate-800">Timestamp</th>
+                                <th class="px-4 py-2 bg-slate-800">IP</th>
+                                <th class="px-4 py-2 bg-slate-800">Model</th>
+                                <th class="px-4 py-2 bg-slate-800">Tokens</th>
+                                <th class="px-4 py-2 text-right bg-slate-800">Action</th>
                             </tr>
                         </thead>
                         <tbody id="queries-body"></tbody>
