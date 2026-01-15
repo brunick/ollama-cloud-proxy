@@ -1,0 +1,54 @@
+# Changelog
+
+Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
+
+## [1.15.0] - 2024-05-24
+### Added
+- 🎨 Dashboard-Optimierung: Scrollbare Container für die Tabellen "Aggregated Stats" und "Recent Queries".
+- 📌 Sticky Headers: Tabellenköpfe bleiben beim Scrollen fixiert für bessere Übersichtlichkeit.
+
+## [1.14.4] - 2024-05-24
+### Fixed
+- 🐞 SQL-Fehler: Korrektur der `GROUP BY` und `ORDER BY` Klauseln im `/stats` Endpunkt nach der Umstellung auf UTC-Buckets.
+
+## [1.14.3] - 2024-05-24
+### Fixed
+- 🔗 Stabilität: Umstellung auf einen globalen `AsyncClient`, um vorzeitige Verbindungsabbrüche (`ReadError`) bei Streaming-Antworten zu verhindern.
+- 🛡️ Frontend-Sicherheit: Zusätzliche Array-Prüfungen im Dashboard, um Abstürze bei fehlerhaften API-Antworten zu vermeiden.
+
+## [1.14.2] - 2024-05-24
+### Fixed
+- 🛡️ Robustheit: Behebung eines 500er-Fehlers bei Key-Erschöpfung; der Proxy gibt nun die korrekte Fehlermeldung des letzten Keys zurück.
+- 📝 Logging: Detaillierte Log-Ausgaben für Key-Rotationen und fehlgeschlagene Versuche.
+
+## [1.14.1] - 2024-05-24
+### Fixed
+- 🌍 Timezone handling: Umstellung auf ein reines UTC-Backend mit ISO 8601 Zeitstempeln und lokaler Konvertierung im Browser. Löst Probleme mit verschobenen Daten in Charts.
+
+## [1.14.0] - 2024-05-24
+### Added
+- 🔄 **Automatische Key-Rotation**: Bei einem `429 Too Many Requests` wird der Request intern sofort mit einem anderen verfügbaren Key wiederholt.
+- ⚖️ Erweitertes Load-Balancing: Keys werden während eines Retries intelligent ausgeschlossen, bis alle Optionen erschöpft sind.
+
+## [1.13.2] - 2024-05-24
+### Fixed
+- 🐞 Daten-Replikation: Verwendung eindeutiger Minuten-Buckets (`YYYY-MM-DD HH:MM`) im Graphen, um Überschneidungen an Tagesgrenzen zu verhindern.
+
+## [1.13.1] - 2024-05-24
+### Fixed
+- 📉 Chart-Fix: Korrektur der Skalierung der Summenlinie im Token-Usage-Graph.
+
+## [1.13.0] - 2024-05-24
+### Added
+- ⚙️ Konfigurierbare Zeitfenster: Der Token-Usage-Graph unterstützt nun Zeiträume von 60m, 2h, 4h, 6h, 12h und 24h.
+
+## [1.12.0] - 2024-05-24
+### Added
+- 📈 **Token Counter**: Neues Dashboard-Element für die Gesamtanzahl der Tokens der letzten 24 Stunden.
+- 📊 Sparklines: Kleiner Hintergrund-Graph für den Token-Trend im Counter-Element.
+- 🚀 Backend: Neuer Endpunkt `/stats/24h` für aggregierte Tagesstatistiken.
+
+## [1.11.0] - 2024-05-23
+### Added
+- ⚖️ Initiales Load-Balancing basierend auf der Nutzung der letzten 2 Stunden.
+- 🖥️ Erstes Dashboard mit API-Key Status und Token-Usage-Chart (letzte 60 Min).
