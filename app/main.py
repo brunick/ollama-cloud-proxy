@@ -333,8 +333,8 @@ async def get_stats():
                     SUM(prompt_tokens) as prompt_tokens,
                     SUM(completion_tokens) as completion_tokens
                 FROM usage
-                GROUP BY date, hour, client_ip, key_index, model
-                ORDER BY date DESC, hour DESC
+                GROUP BY bucket, client_ip, key_index, model
+                ORDER BY bucket DESC
             """
             rows = conn.execute(query).fetchall()
             return [dict(row) for row in rows]
