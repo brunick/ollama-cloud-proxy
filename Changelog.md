@@ -2,6 +2,17 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.18.0] - 2024-05-24
+### Added
+- 🤖 **Background Health Worker**: Ein interner asyncio-Task prüft nun alle 60 Sekunden automatisch, ob bestrafte Keys wieder einsatzbereit sind.
+- 🛠️ Refactoring der Health-Check Logik zur nahtlosen Integration von Hintergrund-Prozessen und Dashboard-Abfragen.
+
+## [1.17.0] - 2024-05-24
+### Added
+- ⏳ **Exponentielles Backoff**: Keys werden bei wiederholten Rate-Limits (`429`) progressiv länger gesperrt (15m, 1h, 2h, 6h, 12h, 24h).
+- 🔄 **Manueller Reset**: Neue Schaltfläche im Dashboard, um Penalty und Backoff-Level eines Keys sofort zurückzusetzen.
+- 📊 Erweiterte Key-Karten: Anzeige des aktuellen Backoff-Levels und Countdowns bis zur nächsten automatischen Prüfung.
+
 ## [1.16.0] - 2024-05-24
 ### ⚠️ BREAKING CHANGES
 - **API-Key Konfiguration**: Die Unterstützung für API-Keys über die Umgebungsvariablen `OLLAMA_API_KEYS` und `OLLAMA_API_KEY` wurde entfernt.
