@@ -370,6 +370,28 @@ async def reset_key_penalty(
     return {"status": "reset", "key_index": key_index}
 
 
+@app.post("/health/keys/{key_index}/penalize")
+async def penalize_key_manually(
+    key_index: int, authorization: Optional[str] = Header(None)
+):
+    """Manually put a key in the penalty box."""
+    await verify_auth(authorization)
+
+    if key_index >= len(OLLAMA_API_KEYS):
+        raise HTTPException(status_code=404, detail="Key index out of range")
+
+    # Set to first backoff level (15 min) or keep existing if higher
+    current_level = key_backoff_levels.get(key_index, 0)
+    key_backoff_levels[key_index] = current_level
+    key_penalty_box[key_index] = time.time() + BACKOFF_STAGES[current_level]
+
+    return {
+        "status": "penalized_manually",
+        "key_index": key_index,
+        "expires_in": BACKOFF_STAGES[current_level],
+    }
+
+
 async def perform_keys_health_check(force_all: bool = False):
     """
     Internal logic to check keys.
@@ -772,6 +794,11 @@ async def dashboard():
                             <div class="flex justify-between items-start mb-2">
                                 <span class="font-bold text-slate-300">${keyId}</span>
                                 <div class="flex gap-2 items-center">
+                                    ${!isPenalized ? `
+                                    <button onclick="penalizeKey(${idx})" class="p-1 hover:bg-slate-700 rounded text-slate-500 hover:text-orange-400 transition" title="Pause / Penalize Key">
+                                        <i data-lucide="pause-circle" size="12"></i>
+                                    </button>
+                                    ` : ''}
                                     <button onclick="resetKey(${idx})" class="p-1 hover:bg-slate-700 rounded text-slate-500 hover:text-white transition" title="Reset Penalty">
                                         <i data-lucide="rotate-ccw" size="12"></i>
                                     </button>
@@ -955,6 +982,15 @@ async def dashboard():
                 if (res.ok) loadStats();
             } catch (err) {
                 console.error("Failed to reset key", err);
+            }
+        }
+
+        async function penalizeKey(idx) {
+            try {
+                const res = await fetch(`/health/keys/${idx}/penalize`, { method: 'POST' });
+                if (res.ok) loadStats();
+            } catch (err) {
+                console.error("Failed to penalize key", err);
             }
         }
 
