@@ -2,6 +2,11 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.19.5] - 2024-05-24
+### Added
+- 🔍 **Massives Diagnostic Logging**: Detailliertes Step-by-Step Logging für jede Anfrage eingebaut, um die Ursache von 500er-Fehlern präzise zu identifizieren.
+- 🛡️ **Erweiterte Exception-Kontrolle**: Zusätzliche try-except Blöcke für Authentifizierung und Stream-Initialisierung.
+
 ## [1.19.4] - 2024-05-24
 ### Fixed
 - 🛡️ **Stabilität beim Key-Wechsel**: Behebung von 500er-Fehlern durch saubereres Schließen von Verbindungen (`aclose`) vor einem Retry.

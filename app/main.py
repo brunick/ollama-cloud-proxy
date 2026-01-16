@@ -1128,8 +1128,15 @@ async def proxy_ollama(
 async def _handle_proxy(
     request: Optional[Request], path: str, authorization: Optional[str] = Header(None)
 ):
+    print(
+        f"DEBUG [Entry]: {request.method if request else 'N/A'} /{path} from {request.client.host if request and request.client else 'unknown'}"
+    )
     # 1. Verify access to this proxy
-    await verify_auth(authorization)
+    try:
+        await verify_auth(authorization)
+    except Exception as e:
+        print(f"DEBUG [Auth Failed]: {e}")
+        raise
 
     # 2. Prepare request to Ollama Cloud
     # Ollama Cloud API base is https://ollama.com
@@ -1155,12 +1162,16 @@ async def _handle_proxy(
         client_ip = client_ip.split(",")[0].strip()
 
     # 2.5 Immediately store request body and create log entry
+    print(
+        f"DEBUG [Prep]: Target URL: {url}, Content-Length: {len(content) if content else 0}"
+    )
     file_path = store_request_file(client_ip, content or b"")
     request_id = create_request_log(
         client_ip=client_ip, method=method, endpoint=clean_path, file_path=file_path
     )
 
     async def log_stream_usage(response_iter, k_index, c_ip, request_id):
+        print(f"DEBUG [Stream]: Started for Key {k_index}")
         # Buffer the tail of the response to ensure we can parse the final JSON
         # Even if it's split across multiple network chunks.
         tail_buffer = b""
@@ -1212,7 +1223,8 @@ async def _handle_proxy(
                 except json.JSONDecodeError:
                     continue
         except Exception as e:
-            print(f"Logging error: {e}")
+            print(f"DEBUG [Stream Error]: {e}")
+            traceback.print_exc()
 
     # 3. Handle Streaming or normal response with retry logic for 429
     attempted_indices = set()
@@ -1232,6 +1244,7 @@ async def _handle_proxy(
 
         attempted_indices.add(current_key_index)
         current_key = OLLAMA_API_KEYS[current_key_index]
+        print(f"DEBUG [Attempt {attempt + 1}]: Selected Key Index {current_key_index}")
 
         headers = {
             "Authorization": f"Bearer {current_key}",
@@ -1242,10 +1255,16 @@ async def _handle_proxy(
 
         response = None
         try:
+            print(f"DEBUG [Attempt {attempt + 1}]: Sending request to {url}...")
             req = http_client.build_request(
                 method, url, content=content, params=params, headers=headers
             )
             response = await http_client.send(req, stream=True)
+            print(
+                f"DEBUG [Attempt {attempt + 1}]: Received status {response.status_code}"
+            )
+            # Log headers for debugging (sensitive ones like Auth are not in response headers anyway)
+            # print(f"DEBUG [Attempt {attempt + 1}]: Response Headers: {dict(response.headers)}")
 
             # If quota exceeded, penalize and retry if possible
             if response.status_code == 429:
@@ -1280,6 +1299,9 @@ async def _handle_proxy(
                     f"Key {current_key_index} (attempt {attempt + 1}) encountered upstream error ({response.status_code}). Penalized for 30s."
                 )
                 if attempt < len(OLLAMA_API_KEYS) - 1:
+                    print(
+                        f"DEBUG [Attempt {attempt + 1}]: Retrying due to 50x error..."
+                    )
                     await response.aclose()
                     continue
 
@@ -1293,6 +1315,9 @@ async def _handle_proxy(
                 rate_limit_store[f"key_{current_key_index}"] = rl_headers
 
             # Return the response
+            print(
+                f"DEBUG [Attempt {attempt + 1}]: Returning StreamingResponse with status {response.status_code}"
+            )
             return StreamingResponse(
                 log_stream_usage(
                     response.aiter_raw(),
@@ -1321,6 +1346,7 @@ async def _handle_proxy(
             break
 
     # If we reached here, all attempts failed with exceptions or exhausted keys
+    print(f"DEBUG [Final]: All attempts failed. Last exception: {last_exception}")
     if last_exception:
         error_detail = str(last_exception)
         status_code = 500
