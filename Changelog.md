@@ -2,6 +2,10 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.19.9] - 2026-01-16
+### Fixed
+- 🕒 **Logging**: Zeitstempel zu den Docker/Uvicorn-Logs hinzugefügt für bessere Nachverfolgbarkeit.
+
 ## [1.19.8] - 2026-01-16
 ### Fixed
 - 🙈 **Config Tracking**: `config/config.yaml` aus dem Git-Index entfernt, um das Überschreiben lokaler User-Konfigurationen zu verhindern.
