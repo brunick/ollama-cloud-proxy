@@ -63,6 +63,11 @@ def init_db():
         except sqlite3.OperationalError:
             pass  # Column already exists
 
+        # Performance indexes
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_usage_timestamp ON usage (timestamp)"
+        )
+
 
 init_db()
 
@@ -82,6 +87,10 @@ def init_extra_tables():
                 file_path TEXT
             )
         """)
+        # Performance indexes
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_requests_timestamp ON requests (timestamp)"
+        )
 
 
 init_extra_tables()
@@ -427,67 +436,68 @@ async def perform_keys_health_check(force_all: bool = False):
     If force_all is False, it only checks keys that are not currently penalized
     or whose penalty has expired.
     """
-    results = {}
     now = time.time()
+
+    async def check_single_key(i: int, key: str, client: httpx.AsyncClient):
+        is_penalized = i in key_penalty_box and key_penalty_box[i] > now
+
+        if is_penalized and not force_all:
+            return f"key_{i}", {
+                "status": "⏳ PENALIZED",
+                "penalty_active": True,
+                "expires_in": int(key_penalty_box[i] - now),
+                "backoff_level": key_backoff_levels.get(i, 0),
+                "usage_2h": 0,
+            }
+
+        try:
+            payload = {
+                "model": "gemma3:4b-cloud",
+                "prompt": "test",
+                "stream": True,
+            }
+            response = await client.post(
+                f"{OLLAMA_CLOUD_URL}/api/generate",
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+
+            if response.status_code == 200:
+                status = "✅ OK"
+                if i in key_penalty_box:
+                    del key_penalty_box[i]
+                if i in key_backoff_levels:
+                    del key_backoff_levels[i]
+            elif response.status_code == 429:
+                status = "🚫 RATE LIMITED"
+                current_level = key_backoff_levels.get(i, -1) + 1
+                level = min(current_level, len(BACKOFF_STAGES) - 1)
+                key_backoff_levels[i] = level
+                key_penalty_box[i] = now + BACKOFF_STAGES[level]
+            else:
+                status = f"❌ ERROR {response.status_code}"
+
+            return f"key_{i}", {
+                "status": status,
+                "penalty_active": i in key_penalty_box and key_penalty_box[i] > now,
+                "expires_in": int(key_penalty_box[i] - now)
+                if i in key_penalty_box
+                else 0,
+                "backoff_level": key_backoff_levels.get(i, 0),
+                "usage_2h": 0,
+            }
+        except Exception as e:
+            return f"key_{i}", {"status": "📡 OFFLINE", "error": str(e)}
+
     async with httpx.AsyncClient(timeout=10.0) as client:
-        for i, key in enumerate(OLLAMA_API_KEYS):
-            # Check if we should perform a health check for this key
-            is_penalized = i in key_penalty_box and key_penalty_box[i] > now
-
-            if is_penalized and not force_all:
-                results[f"key_{i}"] = {
-                    "status": "⏳ PENALIZED",
-                    "penalty_active": True,
-                    "expires_in": int(key_penalty_box[i] - now),
-                    "backoff_level": key_backoff_levels.get(i, 0),
-                    "usage_2h": 0,
-                }
-                continue
-
-            try:
-                # Use a lightweight request to check key status
-                payload = {
-                    "model": "gemma3:4b-cloud",
-                    "prompt": "test",
-                    "stream": True,
-                }
-                response = await client.post(
-                    f"{OLLAMA_CLOUD_URL}/api/generate",
-                    headers={
-                        "Authorization": f"Bearer {key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=payload,
-                )
-
-                if response.status_code == 200:
-                    status = "✅ OK"
-                    # Reset backoff on success
-                    if i in key_penalty_box:
-                        del key_penalty_box[i]
-                    if i in key_backoff_levels:
-                        del key_backoff_levels[i]
-                elif response.status_code == 429:
-                    status = "🚫 RATE LIMITED"
-                    # Increase backoff level
-                    current_level = key_backoff_levels.get(i, -1) + 1
-                    level = min(current_level, len(BACKOFF_STAGES) - 1)
-                    key_backoff_levels[i] = level
-                    key_penalty_box[i] = now + BACKOFF_STAGES[level]
-                else:
-                    status = f"❌ ERROR {response.status_code}"
-
-                results[f"key_{i}"] = {
-                    "status": status,
-                    "penalty_active": i in key_penalty_box and key_penalty_box[i] > now,
-                    "expires_in": int(key_penalty_box[i] - now)
-                    if i in key_penalty_box
-                    else 0,
-                    "backoff_level": key_backoff_levels.get(i, 0),
-                    "usage_2h": 0,
-                }
-            except Exception as e:
-                results[f"key_{i}"] = {"status": "📡 OFFLINE", "error": str(e)}
+        tasks = [
+            check_single_key(i, key, client) for i, key in enumerate(OLLAMA_API_KEYS)
+        ]
+        check_results = await asyncio.gather(*tasks)
+        results = dict(check_results)
 
     # Add usage info
     with sqlite3.connect(DB_PATH) as conn:

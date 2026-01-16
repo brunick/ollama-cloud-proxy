@@ -2,6 +2,11 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.20.1] - 2026-01-16
+### Fixed
+- 🚀 **Dashboard-Performance**: Parallelisierung der API-Key Health-Checks mittels `asyncio.gather` reduziert die Ladezeit bei vielen Keys drastisch (#25).
+- 📊 **Datenbank-Optimierung**: Indexe auf `timestamp`-Spalten hinzugefügt, um Statistiken und Abfragen bei großen Datenmengen zu beschleunigen (#25).
+
 ## [1.20.0] - 2026-01-16
 ### Added
 - 🗝️ **Key Grouping**: API-Keys im Dashboard werden nun ab 6 Keys automatisch gruppiert und können ein- bzw. ausgeklappt werden (#24).
