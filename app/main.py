@@ -443,9 +443,18 @@ async def perform_keys_health_check(force_all: bool = False):
 
             try:
                 # Use a lightweight request to check key status
-                response = await client.get(
-                    f"{OLLAMA_CLOUD_URL}/v1/models",
-                    headers={"Authorization": f"Bearer {key}"},
+                payload = {
+                    "model": "gemma3:4b-cloud",
+                    "prompt": "test",
+                    "stream": True,
+                }
+                response = await client.post(
+                    f"{OLLAMA_CLOUD_URL}/api/generate",
+                    headers={
+                        "Authorization": f"Bearer {key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
                 )
 
                 if response.status_code == 200:
