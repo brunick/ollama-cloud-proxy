@@ -2,6 +2,10 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.20.2] - 2026-01-16
+### Optimized
+- ⚡ **Health-Check Caching**: API-Key Health-Checks werden nun im Hintergrund durchgeführt und die Ergebnisse gecached. Der Dashboard-Aufruf ist dadurch nahezu verzögerungsfrei (#32).
+
 ## [1.20.1] - 2026-01-16
 ### Fixed
 - 🚀 **Dashboard-Performance**: Parallelisierung der API-Key Health-Checks mittels `asyncio.gather` reduziert die Ladezeit bei vielen Keys drastisch (#25).
