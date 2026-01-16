@@ -2,6 +2,11 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.19.6] - 2024-05-24
+### Fixed
+- 🔄 **Retry bei Upstream-500**: Der Proxy versucht nun automatisch einen anderen Key, wenn Ollama Cloud mit einem 500 Internal Server Error antwortet.
+- ⏱️ **Kurzzeit-Penalty**: Keys, die einen 500er verursachen, werden für 30 Sekunden pausiert, um Instabilitäten abzufangen.
+
 ## [1.19.5] - 2024-05-24
 ### Added
 - 🔍 **Massives Diagnostic Logging**: Detailliertes Step-by-Step Logging für jede Anfrage eingebaut, um die Ursache von 500er-Fehlern präzise zu identifizieren.

@@ -1290,8 +1290,8 @@ async def _handle_proxy(
                     await response.aclose()
                     continue
 
-            # If server error (502, 503, 504), penalize briefly and retry
-            elif response.status_code in [502, 503, 504]:
+            # If server error (500, 502, 503, 504), penalize briefly and retry
+            elif response.status_code in [500, 502, 503, 504]:
                 now = time.time()
                 # Penalize for 30 seconds to let the upstream stabilize
                 key_penalty_box[current_key_index] = now + 30
