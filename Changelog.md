@@ -2,6 +2,13 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.19.0] - 2024-05-24
+### Fixed
+- 🛡️ **Stabilität beim Key-Wechsel**: Behebung von 500er-Fehlern durch saubereres Schließen von Verbindungen (`aclose`) vor einem Retry.
+- 🔍 **Detailliertes Debugging**: Einführung von Traceback-Logging bei kritischen Fehlern in der Proxy-Logik zur schnelleren Fehleranalyse.
+- 🚦 **Intelligente Key-Rotation**: Erweiterung der Retry-Logik auf Upstream-Fehler (502, 503, 504) mit automatischer 30-sekündiger Abkühlphase für betroffene Keys.
+- 🩹 **Fehler-Durchreichung**: Verbesserte Status-Code Behandlung; wenn alle Keys versagen, wird nun ein präziserer 503-Status oder die ursprüngliche Fehlermeldung geliefert.
+
 ## [1.18.0] - 2024-05-24
 ### Added
 - 🤖 **Background Health Worker**: Ein interner asyncio-Task prüft nun alle 60 Sekunden automatisch, ob bestrafte Keys wieder einsatzbereit sind.

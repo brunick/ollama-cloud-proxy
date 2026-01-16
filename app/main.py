@@ -7,6 +7,7 @@ import json
 import os
 import sqlite3
 import time
+import traceback
 import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
@@ -1222,6 +1223,7 @@ async def _handle_proxy(
             i for i in range(len(OLLAMA_API_KEYS)) if i not in attempted_indices
         ]
         if not available_indices:
+            print("No more available indices for retry.")
             break
 
         current_key_index = get_best_key_index(exclude=attempted_indices)
@@ -1238,6 +1240,7 @@ async def _handle_proxy(
             else "application/json",
         }
 
+        response = None
         try:
             req = http_client.build_request(
                 method, url, content=content, params=params, headers=headers
@@ -1247,13 +1250,11 @@ async def _handle_proxy(
             # If quota exceeded, penalize and retry if possible
             if response.status_code == 429:
                 now = time.time()
-                # Increase backoff level
                 current_level = key_backoff_levels.get(current_key_index, -1) + 1
                 level = min(current_level, len(BACKOFF_STAGES) - 1)
                 key_backoff_levels[current_key_index] = level
 
                 reset_after = BACKOFF_STAGES[level]
-                # Respect X-Ratelimit-Reset if it's LONGER than our backoff
                 if "x-ratelimit-reset" in response.headers:
                     try:
                         header_reset = int(response.headers["x-ratelimit-reset"])
@@ -1269,7 +1270,18 @@ async def _handle_proxy(
                 if attempt < len(OLLAMA_API_KEYS) - 1:
                     await response.aclose()
                     continue
-                # On last attempt, we must return the response (which is 429)
+
+            # If server error (502, 503, 504), penalize briefly and retry
+            elif response.status_code in [502, 503, 504]:
+                now = time.time()
+                # Penalize for 30 seconds to let the upstream stabilize
+                key_penalty_box[current_key_index] = now + 30
+                print(
+                    f"Key {current_key_index} (attempt {attempt + 1}) encountered upstream error ({response.status_code}). Penalized for 30s."
+                )
+                if attempt < len(OLLAMA_API_KEYS) - 1:
+                    await response.aclose()
+                    continue
 
             # Capture rate limit headers
             rl_headers = {
@@ -1280,7 +1292,7 @@ async def _handle_proxy(
             if rl_headers:
                 rate_limit_store[f"key_{current_key_index}"] = rl_headers
 
-            # Return the successful (or final 429) response
+            # Return the response
             return StreamingResponse(
                 log_stream_usage(
                     response.aiter_raw(),
@@ -1293,18 +1305,30 @@ async def _handle_proxy(
             )
         except Exception as e:
             last_exception = e
-            print(f"Key {current_key_index} (attempt {attempt + 1}) failed: {e}")
+            print(
+                f"CRITICAL: Key {current_key_index} (attempt {attempt + 1}) failed with exception: {e}"
+            )
+            traceback.print_exc()
+
+            if response:
+                try:
+                    await response.aclose()
+                except:
+                    pass
+
             if attempt < len(OLLAMA_API_KEYS) - 1:
                 continue
             break
 
     # If we reached here, all attempts failed with exceptions or exhausted keys
-    error_detail = (
-        str(last_exception)
-        if last_exception
-        else "All API keys exhausted or rate-limited"
-    )
-    raise HTTPException(status_code=500, detail=error_detail)
+    if last_exception:
+        error_detail = str(last_exception)
+        status_code = 500
+    else:
+        error_detail = "All API keys exhausted, rate-limited, or returned errors"
+        status_code = 503  # Service Unavailable is more appropriate than 500
+
+    raise HTTPException(status_code=status_code, detail=error_detail)
 
 
 if __name__ == "__main__":
