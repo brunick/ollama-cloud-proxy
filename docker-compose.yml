@@ -2,14 +2,9 @@ services:
   ollama-cloud-proxy:
     build: .
     ports:
-      - "11434:11434"
+      - "11435:11434"
     environment:
-      # Der echte Key von ollama.com/settings/api-keys (oder nutze config/config.yaml)
-      - OLLAMA_API_KEY=${OLLAMA_API_KEY}
-      # Ein selbst gewählter Token, um den Proxy abzusichern
-      - PROXY_AUTH_TOKEN=${PROXY_AUTH_TOKEN:-}
-      # Auf "true" setzen, um die Token-Prüfung zu deaktivieren
-      - ALLOW_UNAUTHENTICATED_ACCESS=${ALLOW_UNAUTHENTICATED_ACCESS:-false}
+      - ALLOW_UNAUTHENTICATED_ACCESS=${ALLOW_UNAUTHENTICATED_ACCESS:-true}
     volumes:
       - ./config:/app/config
       - ./data:/app/data
