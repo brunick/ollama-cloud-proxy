@@ -25,6 +25,9 @@ rate_limit_store = {}
 key_penalty_box: Dict[int, float] = {}
 # Track backoff levels for keys: {key_index: level_index}
 key_backoff_levels: Dict[int, int] = {}
+# Global cache for key health results
+cached_health_results: Dict[str, dict] = {}
+last_health_check_timestamp: float = 0
 
 # Backoff stages in seconds: 15m, 1h, 2h, 6h, 12h, 24h
 BACKOFF_STAGES = [
@@ -436,6 +439,7 @@ async def perform_keys_health_check(force_all: bool = False):
     If force_all is False, it only checks keys that are not currently penalized
     or whose penalty has expired.
     """
+    global cached_health_results, last_health_check_timestamp
     now = time.time()
 
     async def check_single_key(i: int, key: str, client: httpx.AsyncClient):
@@ -512,14 +516,20 @@ async def perform_keys_health_check(force_all: bool = False):
             if key_id in results:
                 results[key_id]["usage_2h"] = row["usage"]
 
+    cached_health_results = results
+    last_health_check_timestamp = now
     return results
 
 
 @app.get("/health/keys")
-async def check_keys_health(authorization: Optional[str] = Header(None)):
-    """Manually trigger a health check for all keys."""
+async def check_keys_health(
+    force: bool = False, authorization: Optional[str] = Header(None)
+):
+    """Get health status for all keys. Returns cached results by default."""
     await verify_auth(authorization)
-    return await perform_keys_health_check(force_all=True)
+    if force or not cached_health_results:
+        return await perform_keys_health_check(force_all=force)
+    return cached_health_results
 
 
 async def background_health_worker():
@@ -674,7 +684,7 @@ async def dashboard():
                 <p class="text-slate-400">Monitoring and Usage Statistics</p>
             </div>
             <div class="flex gap-4">
-                <button onclick="loadStats()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg flex items-center gap-2 transition">
+                <button onclick="loadStats(true)" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg flex items-center gap-2 transition">
                     <i data-lucide="refresh-cw" size="18"></i> Refresh
                 </button>
             </div>
@@ -803,13 +813,13 @@ async def dashboard():
             loadStats();
         }
 
-        async function loadStats() {
+        async function loadStats(force = false) {
             try {
                 const [statsRes, queriesRes, minuteRes, keysRes, dailyRes] = await Promise.all([
                     fetch('/stats'),
                     fetch('/queries'),
                     fetch(`/stats/minute?window=${currentTimeRange}`),
-                    fetch('/health/keys'),
+                    fetch('/health/keys' + (force ? '?force=true' : '')),
                     fetch('/stats/24h')
                 ]);
 
