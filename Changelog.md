@@ -5,6 +5,8 @@ Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert
 ## [1.19.7] - 2026-01-16
 ### Fixed
 - 🙈 **Config Tracking**: `config/config.yaml` aus dem Git-Index entfernt, um das Überschreiben lokaler User-Konfigurationen zu verhindern.
+- 🧪 **CI-Pipeline**: Automatisches Erstellen einer Dummy-Konfiguration für die CI-Tests hinzugefügt.
+- 📝 **Fehlermeldung**: Irreführender Hinweis auf Umgebungsvariablen in der `load_keys` Fehlermeldung korrigiert.
 
 ## [1.19.6] - 2024-05-24
 ### Fixed
