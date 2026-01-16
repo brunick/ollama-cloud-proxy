@@ -2,7 +2,7 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
-## [1.19.0] - 2024-05-24
+## [1.19.4] - 2024-05-24
 ### Fixed
 - 🛡️ **Stabilität beim Key-Wechsel**: Behebung von 500er-Fehlern durch saubereres Schließen von Verbindungen (`aclose`) vor einem Retry.
 - 🔍 **Detailliertes Debugging**: Einführung von Traceback-Logging bei kritischen Fehlern in der Proxy-Logik zur schnelleren Fehleranalyse.
