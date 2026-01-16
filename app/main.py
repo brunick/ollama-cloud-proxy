@@ -207,7 +207,9 @@ def load_keys() -> List[str]:
 
 OLLAMA_API_KEYS = load_keys()
 if not OLLAMA_API_KEYS:
-    raise ValueError("No OLLAMA_API_KEYS found in config or environment variables")
+    raise ValueError(
+        "No API keys found in config/config.yaml. Environment variables are no longer supported."
+    )
 
 
 def get_best_key_index(exclude: Optional[set] = None) -> int:

@@ -25,9 +25,10 @@ jobs:
           pip install -r app/requirements.txt
           pip install pytest httpx
 
+      - name: Prepare config
+        run: cp config/config.template.yaml config/config.yaml
+
       - name: Run simple tests
-        env:
-          OLLAMA_API_KEY: "dummy_key_for_testing"
         run: |
           # Simple syntax check and import test
           python -c "import app.main; print('Import successful')"
