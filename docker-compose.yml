@@ -2,7 +2,7 @@ services:
   ollama-cloud-proxy:
     build: .
     ports:
-      - "11435:11434"
+      - "11434:11434"
     environment:
       - ALLOW_UNAUTHENTICATED_ACCESS=${ALLOW_UNAUTHENTICATED_ACCESS:-true}
     volumes:
