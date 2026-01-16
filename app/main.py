@@ -675,8 +675,19 @@ async def dashboard():
                 <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
                     <i data-lucide="key"></i> API Key Status & Load Balancing
                 </h2>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="keys-container">
-                    <!-- Key status cards will be injected here -->
+                <div id="keys-wrapper">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="keys-container">
+                        <!-- Key status cards will be injected here -->
+                    </div>
+                    <div id="keys-collapsed-container" class="hidden mt-4 pt-4 border-t border-slate-700">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="keys-container-more">
+                            <!-- Additional keys will be injected here -->
+                        </div>
+                    </div>
+                    <button id="show-more-keys-btn" onclick="toggleMoreKeys()" class="hidden w-full mt-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs rounded-lg transition flex items-center justify-center gap-2">
+                        <span id="show-more-text">Show More Keys</span>
+                        <i id="show-more-icon" data-lucide="chevron-down" size="14"></i>
+                    </button>
                 </div>
             </div>
 
@@ -808,7 +819,13 @@ async def dashboard():
                 }
 
                 const keysContainer = document.getElementById('keys-container');
-                keysContainer.innerHTML = Object.entries(keysData).map(([keyId, info]) => {
+                const keysContainerMore = document.getElementById('keys-container-more');
+                const showMoreBtn = document.getElementById('show-more-keys-btn');
+                const keysEntries = Object.entries(keysData);
+                const limit = 6;
+                const showCollapse = keysEntries.length > limit;
+
+                const renderKeyCard = ([keyId, info]) => {
                     const idx = keyId.split('_')[1];
                     const isPenalized = info.penalty_active;
                     const statusColor = isPenalized ? 'text-red-400' : (info.status.includes('OK') ? 'text-green-400' : 'text-yellow-400');
@@ -850,7 +867,20 @@ async def dashboard():
                             </div>
                         </div>
                     `;
-                }).join('');
+                };
+
+                keysContainer.innerHTML = keysEntries.slice(0, showCollapse ? limit : keysEntries.length).map(renderKeyCard).join('');
+
+                if (showCollapse) {
+                    keysContainerMore.innerHTML = keysEntries.slice(limit).map(renderKeyCard).join('');
+                    showMoreBtn.classList.remove('hidden');
+                    document.getElementById('show-more-text').textContent = document.getElementById('keys-collapsed-container').classList.contains('hidden')
+                        ? `Show ${keysEntries.length - limit} more keys`
+                        : 'Show less';
+                } else {
+                    showMoreBtn.classList.add('hidden');
+                    document.getElementById('keys-collapsed-container').classList.add('hidden');
+                }
 
                 const statsBody = document.getElementById('stats-body');
                 if (stats.length === 0) {
@@ -1091,6 +1121,23 @@ async def dashboard():
                     }
                 });
             }
+        }
+
+        function toggleMoreKeys() {
+            const container = document.getElementById('keys-collapsed-container');
+            const btnText = document.getElementById('show-more-text');
+            const btnIcon = document.getElementById('show-more-icon');
+            const isHidden = container.classList.toggle('hidden');
+
+            const totalMore = document.getElementById('keys-container-more').children.length;
+            btnText.textContent = isHidden ? `Show ${totalMore} more keys` : 'Show less';
+
+            if (isHidden) {
+                btnIcon.setAttribute('data-lucide', 'chevron-down');
+            } else {
+                btnIcon.setAttribute('data-lucide', 'chevron-up');
+            }
+            lucide.createIcons();
         }
 
         function closeViewer() {

@@ -2,6 +2,10 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.20.0] - 2026-01-16
+### Added
+- 🗝️ **Key Grouping**: API-Keys im Dashboard werden nun ab 6 Keys automatisch gruppiert und können ein- bzw. ausgeklappt werden (#24).
+
 ## [1.19.9] - 2026-01-16
 ### Fixed
 - 🕒 **Logging**: Zeitstempel zu den Docker/Uvicorn-Logs hinzugefügt für bessere Nachverfolgbarkeit.
