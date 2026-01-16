@@ -1,6 +1,7 @@
 services:
   ollama-cloud-proxy:
     build: .
+    container_name: "ollama-cloud-proxy"
     ports:
       - "11434:11434"
     environment:
