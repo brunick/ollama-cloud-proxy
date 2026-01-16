@@ -2,6 +2,10 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.19.7] - 2026-01-16
+### Fixed
+- 🙈 **Config Tracking**: `config/config.yaml` aus dem Git-Index entfernt, um das Überschreiben lokaler User-Konfigurationen zu verhindern.
+
 ## [1.19.6] - 2024-05-24
 ### Fixed
 - 🔄 **Retry bei Upstream-500**: Der Proxy versucht nun automatisch einen anderen Key, wenn Ollama Cloud mit einem 500 Internal Server Error antwortet.

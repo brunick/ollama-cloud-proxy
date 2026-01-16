@@ -1,6 +1,0 @@
-# List your Ollama Cloud API keys here.
-# The proxy will rotate to the next key if the current one returns a 429 (Too Many Requests).
-keys:
-  - "your_api_key_1_here"
-  - "your_api_key_2_here"
-  - "your_api_key_3_here"
