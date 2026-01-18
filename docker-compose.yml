@@ -6,7 +6,7 @@ services:
       - "11434:11434"
     environment:
       - ALLOW_UNAUTHENTICATED_ACCESS=${ALLOW_UNAUTHENTICATED_ACCESS:-true}
-      - APP_VERSION=${APP_VERSION:-v1.20.10-local}
+      - APP_VERSION=${APP_VERSION:-v1.20.11-local}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - ./config:/app/config

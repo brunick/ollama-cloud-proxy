@@ -2,6 +2,10 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.20.11] - 2026-01-18
+### Added
+- 🛡️ **Robust Token Tracking**: Regex-Fallback für die Token-Extraktion hinzugefügt. Dies stellt sicher, dass auch bei großen non-streaming Antworten oder hübsch formatiertem JSON die Token-Statistiken korrekt erfasst werden, selbst wenn der Puffer am Ende abgeschnitten ist.
+
 ## [1.20.10] - 2026-01-18
 ### Fixed
 - 🎨 **Layout Fix**: Fehler in der HTML-Struktur behoben, durch den Dashboard-Inhalte beim Umschalten auf Logs teilweise sichtbar blieben oder den Logs-Tab überlagerten.
