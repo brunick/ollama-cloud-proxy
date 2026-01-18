@@ -2,6 +2,14 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.20.5] - 2026-01-18
+### Fixed
+- 🔄 **Cache-Synchronisierung**: Das manuelle Zurücksetzen oder Bestrafen von Keys aktualisiert nun sofort den Dashboard-Cache für eine direkte Rückmeldung.
+- 🩺 **Optimierter Health-Check**: Manuelle Resets verwenden nun denselben robusten Test-Aufruf wie der Hintergrund-Checker.
+
+### Changed
+- ⏱️ **Intelligentes 50x-Backoff**: Upstream-Fehler (500, 502, etc.) führen nun zu einem progressiven Backoff (30s, 2m, 5m, ...), anstatt sofortiger langer Sperren, sofern die Fehler nicht dauerhaft auftreten.
+
 ## [1.20.4] - 2026-01-18
 ### Added
 - 🔗 **Root Redirect**: Aufrufe der Root-URL (`/`) werden nun automatisch zum Dashboard weitergeleitet (#37).
