@@ -4,11 +4,14 @@
 import asyncio
 import gzip
 import json
+import logging
 import os
 import sqlite3
+import sys
 import time
 import traceback
 import uuid
+from collections import deque
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
@@ -24,7 +27,54 @@ from fastapi.responses import (
 
 app = FastAPI()
 
-APP_VERSION = os.getenv("APP_VERSION", "v1.20.6")
+APP_VERSION = os.getenv("APP_VERSION", "v1.20.7")
+
+
+# Dashboard Log Handler
+class DashboardLogHandler(logging.Handler):
+    def __init__(self, capacity=500):
+        super().__init__()
+        self.logs = deque(maxlen=capacity)
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            self.logs.append(
+                {
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "level": record.levelname,
+                    "message": msg,
+                }
+            )
+        except Exception:
+            self.handleError(record)
+
+
+dashboard_log_handler = DashboardLogHandler()
+dashboard_log_handler.setFormatter(logging.Formatter("%(message)s"))
+logger = logging.getLogger("app")
+logger.setLevel(logging.DEBUG)
+logger.addHandler(dashboard_log_handler)
+
+# Capture uvicorn logs too
+logging.getLogger("uvicorn.access").addHandler(dashboard_log_handler)
+logging.getLogger("uvicorn.error").addHandler(dashboard_log_handler)
+
+# Also ensure logs go to stdout for docker logs
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(
+    logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+)
+logger.addHandler(console_handler)
+
+# Redirect standard print to our logger for convenience
+_builtin_print = print
+
+
+def print(*args, **kwargs):
+    msg = " ".join(str(arg) for arg in args)
+    logger.info(msg)
+
 
 # Store latest rate limit headers per key index
 rate_limit_store = {}
@@ -717,6 +767,12 @@ async def get_query_body(query_id: int):
         raise HTTPException(status_code=500, detail=f"Error reading body: {str(e)}")
 
 
+@app.get("/logs")
+async def get_logs():
+    """Returns the latest captured logs."""
+    return list(dashboard_log_handler.logs)
+
+
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():
     """Serves a simple dashboard to view statistics and queries."""
@@ -733,6 +789,8 @@ async def dashboard():
     <style>
         body { background-color: #0f172a; color: #f8fafc; }
         .card { background-color: #1e293b; border: 1px solid #334155; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 </head>
 <body class="p-4 md:p-8">
@@ -765,7 +823,18 @@ async def dashboard():
             </div>
         </header>
 
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+        <!-- Tab Navigation -->
+        <div class="flex border-b border-slate-700 mb-8 gap-2">
+            <button onclick="switchTab('dashboard')" id="btn-tab-dashboard" class="px-6 py-2 font-medium border-b-2 border-blue-500 text-blue-400 flex items-center gap-2 transition-all">
+                <i data-lucide="layout-dashboard" size="18"></i> Dashboard
+            </button>
+            <button onclick="switchTab('logs')" id="btn-tab-logs" class="px-6 py-2 font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center gap-2 transition-all">
+                <i data-lucide="terminal" size="18"></i> Server Logs
+            </button>
+        </div>
+
+        <div id="tab-dashboard">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
             <div class="md:col-span-3 card rounded-xl p-6">
                 <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
                     <i data-lucide="key"></i> API Key Status & Load Balancing
@@ -870,12 +939,99 @@ async def dashboard():
                 <pre id="body-content" class="bg-slate-900 p-4 rounded-lg overflow-auto text-xs text-green-400 flex-1 font-mono"></pre>
             </div>
         </div>
+
+        <!-- Logs Tab -->
+        <div id="tab-logs" class="hidden">
+            <div class="card rounded-xl p-6 flex flex-col h-[calc(100vh-250px)]">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold flex items-center gap-2">
+                        <i data-lucide="scroll-text"></i> Live Server Logs
+                    </h2>
+                    <div class="flex items-center gap-2">
+                        <button onclick="loadLogs()" class="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition" title="Refresh Logs">
+                            <i data-lucide="refresh-cw" size="18"></i>
+                        </button>
+                        <button onclick="clearLogsUI()" class="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-red-400 transition" title="Clear View">
+                            <i data-lucide="trash-2" size="18"></i>
+                        </button>
+                    </div>
+                </div>
+                <div id="logs-container" class="bg-slate-900 rounded-lg p-4 font-mono text-[11px] overflow-auto flex-1 space-y-1 scrollbar-hide">
+                    <div class="text-slate-500 italic">Waiting for logs...</div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
         let usageChart = null;
         let sparklineChart = null;
         let currentTimeRange = 60;
+        let currentTab = 'dashboard';
+
+        function switchTab(tab) {
+            currentTab = tab;
+            if (tab === 'dashboard') {
+                document.getElementById('tab-dashboard').classList.remove('hidden');
+                document.getElementById('tab-logs').classList.add('hidden');
+                document.getElementById('btn-tab-dashboard').classList.add('border-blue-500', 'text-blue-400');
+                document.getElementById('btn-tab-dashboard').classList.remove('border-transparent', 'text-slate-400');
+                document.getElementById('btn-tab-logs').classList.remove('border-blue-500', 'text-blue-400');
+                document.getElementById('btn-tab-logs').classList.add('border-transparent', 'text-slate-400');
+            } else {
+                document.getElementById('tab-dashboard').classList.add('hidden');
+                document.getElementById('tab-logs').classList.remove('hidden');
+                document.getElementById('btn-tab-logs').classList.add('border-blue-500', 'text-blue-400');
+                document.getElementById('btn-tab-logs').classList.remove('border-transparent', 'text-slate-400');
+                document.getElementById('btn-tab-dashboard').classList.remove('border-blue-500', 'text-blue-400');
+                document.getElementById('btn-tab-dashboard').classList.add('border-transparent', 'text-slate-400');
+                loadLogs();
+            }
+            lucide.createIcons();
+        }
+
+        async function loadLogs() {
+            try {
+                const res = await fetch('/logs');
+                const logs = await res.json();
+                const container = document.getElementById('logs-container');
+                const isAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 50;
+
+                if (logs.length === 0) {
+                    container.innerHTML = '<div class="text-slate-500 italic">No logs available yet.</div>';
+                    return;
+                }
+
+                container.innerHTML = logs.map(log => {
+                    let colorClass = 'text-slate-300';
+                    if (log.level === 'ERROR' || log.level === 'CRITICAL') colorClass = 'text-red-400';
+                    else if (log.level === 'WARNING') colorClass = 'text-yellow-400';
+                    else if (log.level === 'DEBUG') colorClass = 'text-slate-500';
+
+                    return `<div class="border-b border-slate-800/30 pb-1 last:border-0 leading-relaxed">
+                        <span class="text-[9px] text-slate-500 font-mono opacity-70">[${log.timestamp}]</span>
+                        <span class="text-[9px] font-bold px-1 rounded ${log.level === 'ERROR' ? 'bg-red-900/30 text-red-400' : (log.level === 'WARNING' ? 'bg-yellow-900/30 text-yellow-400' : 'bg-slate-800 text-slate-400')}">${log.level}</span>
+                        <span class="${colorClass} ml-2 whitespace-pre-wrap">${escapeHtml(log.message)}</span>
+                    </div>`;
+                }).join('');
+
+                if (isAtBottom) {
+                    container.scrollTop = container.scrollHeight;
+                }
+            } catch (err) {
+                console.error("Failed to load logs", err);
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function clearLogsUI() {
+            document.getElementById('logs-container').innerHTML = '<div class="text-slate-500 italic">Logs cleared (view only).</div>';
+        }
 
         function setTimeRange(minutes) {
             currentTimeRange = minutes;
@@ -1261,8 +1417,11 @@ async def dashboard():
         }
 
         loadStats();
-        // Refresh every minute
-        setInterval(loadStats, 60000);
+        // Refresh every 30 seconds
+        setInterval(() => {
+            loadStats();
+            if (currentTab === 'logs') loadLogs();
+        }, 30000);
     </script>
 </body>
 </html>

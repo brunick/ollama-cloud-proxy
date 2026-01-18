@@ -2,6 +2,10 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.20.7] - 2026-01-18
+### Added
+- 📜 **Server Logs Tab**: Neues Tab im Dashboard zur Anzeige von Live-Server-Logs und Debug-Ausgaben direkt im Browser (#43).
+
 ## [1.20.6] - 2026-01-18
 ### Added
 - 📈 **10min View**: Der Token-Usage-Graph unterstützt nun eine detaillierte 10-Minuten-Ansicht für eine präzisere Überwachung der aktuellen Nutzung (#34).
