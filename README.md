@@ -18,6 +18,7 @@ Dieser Proxy leitet Anfragen an die offizielle Ollama Cloud API (`https://ollama
 - **🛡️ Proxy Protection**: Optionaler `PROXY_AUTH_TOKEN`, um unbefugten Zugriff auf deinen Proxy zu verhindern.
 - **🌍 Timezone Support**: Alle Statistiken werden automatisch in der lokalen Zeitzone des Nutzers angezeigt (UTC-Backend).
 - **📝 Request Logging**: Speichert Request-Bodies (komprimiert) für Debugging-Zwecke (einsehbar im Dashboard).
+- **🛡️ Robustes Token-Tracking**: Regex-basierte Extraktion stellt sicher, dass Token-Statistiken auch bei großen non-streaming Antworten oder formatiertem JSON korrekt erfasst werden.
 - **💾 Persistent Logging**: Alle Server-Ausgaben werden rotierend in `data/proxy.log` gespeichert (max. 5MB, 5 Backups).
 
 ## Setup
