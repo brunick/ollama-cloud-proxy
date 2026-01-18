@@ -15,11 +15,16 @@ from typing import Dict, List, Optional
 import httpx
 import yaml
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 
 app = FastAPI()
 
-APP_VERSION = os.getenv("APP_VERSION", "v1.20.3")
+APP_VERSION = os.getenv("APP_VERSION", "v1.20.4")
 
 # Store latest rate limit headers per key index
 rate_limit_store = {}
@@ -319,6 +324,12 @@ async def favicon():
 
 
 @app.get("/")
+async def root_redirect():
+    """Redirect root to dashboard."""
+    return RedirectResponse(url="/dashboard")
+
+
+@app.get("/health")
 async def health_check():
     """Health check endpoint to verify proxy status and Ollama Cloud connectivity."""
     status = {"status": "ok", "ollama_cloud": "unknown", "usage_summary": {}}
@@ -688,7 +699,17 @@ async def dashboard():
                     <span class="px-2 py-0.5 bg-slate-800 text-slate-500 rounded text-[10px] font-mono border border-slate-700">{APP_VERSION}</span>
                 </p>
             </div>
-            <div class="flex gap-4">
+            <div class="flex items-center gap-6">
+                <div class="flex items-center gap-4 text-xs font-medium">
+                    <div class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800/50 rounded-full border border-slate-700">
+                        <span id="proxy-status-dot" class="w-2 h-2 rounded-full bg-slate-500"></span>
+                        <span class="text-slate-400 uppercase tracking-wider">Proxy</span>
+                    </div>
+                    <div class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800/50 rounded-full border border-slate-700">
+                        <span id="cloud-status-dot" class="w-2 h-2 rounded-full bg-slate-500"></span>
+                        <span class="text-slate-400 uppercase tracking-wider">Ollama Cloud</span>
+                    </div>
+                </div>
                 <button onclick="loadStats(true)" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg flex items-center gap-2 transition">
                     <i data-lucide="refresh-cw" size="18"></i> Refresh
                 </button>
@@ -820,15 +841,16 @@ async def dashboard():
 
         async function loadStats(force = false) {
             try {
-                const [statsRes, queriesRes, minuteRes, keysRes, dailyRes] = await Promise.all([
+                const [statsRes, queriesRes, minuteRes, keysRes, dailyRes, healthRes] = await Promise.all([
                     fetch('/stats'),
                     fetch('/queries'),
                     fetch(`/stats/minute?window=${currentTimeRange}`),
                     fetch('/health/keys' + (force ? '?force=true' : '')),
-                    fetch('/stats/24h')
+                    fetch('/stats/24h'),
+                    fetch('/health')
                 ]);
 
-                if (!statsRes.ok || !queriesRes.ok || !minuteRes.ok || !keysRes.ok || !dailyRes.ok) {
+                if (!statsRes.ok || !queriesRes.ok || !minuteRes.ok || !keysRes.ok || !dailyRes.ok || !healthRes.ok) {
                     throw new Error("One or more requests failed");
                 }
 
@@ -837,10 +859,29 @@ async def dashboard():
                 const minuteData = await minuteRes.json();
                 const keysData = await keysRes.json();
                 const dailyData = await dailyRes.json();
+                const healthData = await healthRes.json();
 
                 if (!Array.isArray(stats) || !Array.isArray(queries) || !Array.isArray(minuteData) || !Array.isArray(dailyData)) {
                     console.error("Received non-array data from API", { stats, queries, minuteData, dailyData });
                     return;
+                }
+
+                // Update Health Indicators
+                const proxyDot = document.getElementById('proxy-status-dot');
+                const cloudDot = document.getElementById('cloud-status-dot');
+
+                if (healthData.status === 'ok') {
+                    proxyDot.className = 'w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]';
+                } else {
+                    proxyDot.className = 'w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]';
+                }
+
+                if (healthData.ollama_cloud === 'reachable') {
+                    cloudDot.className = 'w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]';
+                } else if (healthData.ollama_cloud === 'error') {
+                    cloudDot.className = 'w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]';
+                } else {
+                    cloudDot.className = 'w-2 h-2 rounded-full bg-yellow-500 shadow-[0_0_8px_rgba(234,179,8,0.6)]';
                 }
 
                 const keysContainer = document.getElementById('keys-container');
