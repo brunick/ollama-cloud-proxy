@@ -1,3 +1,0 @@
-### Fixed
-- 🐛 **Startup Crash Fix**: Ein kritischer Fehler im Logging-System wurde behoben, der den Start des Servers verhinderte (AttributeError: isatty).
-- 🧹 **Log Clean-up**: Doppelte Log-Einträge im Docker-Log entfernt und Delegierung an den Original-Stream verbessert.
