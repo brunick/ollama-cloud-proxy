@@ -28,7 +28,7 @@ from fastapi.responses import (
 
 app = FastAPI()
 
-APP_VERSION = os.getenv("APP_VERSION", "v1.20.9")
+APP_VERSION = os.getenv("APP_VERSION", "v1.20.10")
 
 # Setup Logging
 LOG_FILE = "data/proxy.log"
@@ -77,8 +77,10 @@ class DashboardLogHandler(logging.Handler):
 dashboard_log_handler = DashboardLogHandler()
 dashboard_log_handler.setFormatter(logging.Formatter("%(message)s"))
 
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
 root_logger = logging.getLogger()
-root_logger.setLevel(logging.INFO)
+root_logger.setLevel(LOG_LEVEL)
 root_logger.addHandler(dashboard_log_handler)
 
 file_handler = logging.handlers.RotatingFileHandler(
@@ -831,6 +833,7 @@ async def dashboard():
         #logs-container { background-color: #020617; border: 1px solid #1e293b; }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
     </style>
 </head>
 <body class="p-4 md:p-8">
@@ -863,17 +866,17 @@ async def dashboard():
             </div>
         </header>
 
-        <!-- Tab Navigation -->
-        <div class="flex border-b border-slate-700 mb-8 gap-2">
-            <button onclick="switchTab('dashboard')" id="btn-tab-dashboard" class="px-6 py-2 font-medium border-b-2 border-blue-500 text-blue-400 flex items-center gap-2 transition-all">
-                <i data-lucide="layout-dashboard" size="18"></i> Dashboard
+        <!-- Navigation Pills -->
+        <div class="flex mb-8 gap-3">
+            <button onclick="switchTab('dashboard')" id="btn-dashboard" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-full text-xs font-medium flex items-center gap-2 transition-all">
+                <i data-lucide="layout-dashboard" size=14></i> Dashboard
             </button>
-            <button onclick="switchTab('logs')" id="btn-tab-logs" class="px-6 py-2 font-medium border-b-2 border-transparent text-slate-400 hover:text-slate-200 flex items-center gap-2 transition-all">
-                <i data-lucide="terminal" size="18"></i> Server Logs
+            <button onclick="switchTab('logs')" id="btn-logs" class="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-full text-xs font-medium border border-slate-700 flex items-center gap-2 transition-all">
+                <i data-lucide="terminal" size=14></i> Server Logs
             </button>
         </div>
 
-        <div id="tab-dashboard">
+        <div id="view-dashboard">
             <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
             <div class="md:col-span-3 card rounded-xl p-6">
                 <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
@@ -904,7 +907,7 @@ async def dashboard():
                     <canvas id="sparklineChart"></canvas>
                 </div>
             </div>
-        </div>
+        </div> <!-- End of grid -->
 
         <div class="card rounded-xl p-6 mb-8">
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4">
@@ -979,14 +982,24 @@ async def dashboard():
                 <pre id="body-content" class="bg-slate-900 p-4 rounded-lg overflow-auto text-xs text-green-400 flex-1 font-mono"></pre>
             </div>
         </div>
+        </div> <!-- End of dashboard view -->
 
-        <!-- Logs Tab -->
-        <div id="tab-logs" class="hidden">
-            <div class="card rounded-xl p-6 flex flex-col h-[calc(100vh-250px)]">
+        <!-- Logs View -->
+        <div id="view-logs" class="hidden">
+            <div class="card rounded-xl p-6 flex flex-col h-[600px]">
                 <div class="flex justify-between items-center mb-4">
-                    <h2 class="text-xl font-semibold flex items-center gap-2">
-                        <i data-lucide="scroll-text"></i> Live Server Logs
-                    </h2>
+                    <div class="flex items-center gap-4">
+                        <h2 class="text-xl font-semibold flex items-center gap-2">
+                            <i data-lucide="scroll-text"></i> Live Server Logs
+                        </h2>
+                        <div class="flex bg-slate-900/50 p-1 rounded-lg border border-slate-800 gap-1 ml-4">
+                            <button onclick="setLogFilter('ALL')" data-filter="ALL" class="filter-btn px-2 py-0.5 rounded text-[10px] font-bold bg-blue-600 text-white transition-all">ALL</button>
+                            <button onclick="setLogFilter('ERROR')" data-filter="ERROR" class="filter-btn px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-500 hover:text-slate-300 transition-all">ERROR</button>
+                            <button onclick="setLogFilter('WARNING')" data-filter="WARNING" class="filter-btn px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-500 hover:text-slate-300 transition-all">WARN</button>
+                            <button onclick="setLogFilter('INFO')" data-filter="INFO" class="filter-btn px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-500 hover:text-slate-300 transition-all">INFO</button>
+                            <button onclick="setLogFilter('DEBUG')" data-filter="DEBUG" class="filter-btn px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-500 hover:text-slate-300 transition-all">DEBUG</button>
+                        </div>
+                    </div>
                     <div class="flex items-center gap-2">
                         <button onclick="loadLogs()" class="p-2 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition" title="Refresh Logs">
                             <i data-lucide="refresh-cw" size="18"></i>
@@ -1008,23 +1021,34 @@ async def dashboard():
         let sparklineChart = null;
         let currentTimeRange = 60;
         let currentTab = 'dashboard';
+        let currentLogFilter = 'ALL';
+
+        function setLogFilter(filter) {
+            currentLogFilter = filter;
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                const isMatch = btn.getAttribute('data-filter') === filter;
+                btn.className = `filter-btn px-2 py-0.5 rounded text-[10px] font-bold transition-all ${isMatch ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-500 hover:text-slate-300'}`;
+            });
+            loadLogs();
+        }
 
         function switchTab(tab) {
             currentTab = tab;
+            const dashView = document.getElementById('view-dashboard');
+            const logsView = document.getElementById('view-logs');
+            const dashBtn = document.getElementById('btn-dashboard');
+            const logsBtn = document.getElementById('btn-logs');
+
             if (tab === 'dashboard') {
-                document.getElementById('tab-dashboard').classList.remove('hidden');
-                document.getElementById('tab-logs').classList.add('hidden');
-                document.getElementById('btn-tab-dashboard').classList.add('border-blue-500', 'text-blue-400');
-                document.getElementById('btn-tab-dashboard').classList.remove('border-transparent', 'text-slate-400');
-                document.getElementById('btn-tab-logs').classList.remove('border-blue-500', 'text-blue-400');
-                document.getElementById('btn-tab-logs').classList.add('border-transparent', 'text-slate-400');
+                dashView.classList.remove('hidden');
+                logsView.classList.add('hidden');
+                dashBtn.className = "px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-full text-xs font-medium flex items-center gap-2 transition-all";
+                logsBtn.className = "px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-full text-xs font-medium border border-slate-700 flex items-center gap-2 transition-all";
             } else {
-                document.getElementById('tab-dashboard').classList.add('hidden');
-                document.getElementById('tab-logs').classList.remove('hidden');
-                document.getElementById('btn-tab-logs').classList.add('border-blue-500', 'text-blue-400');
-                document.getElementById('btn-tab-logs').classList.remove('border-transparent', 'text-slate-400');
-                document.getElementById('btn-tab-dashboard').classList.remove('border-blue-500', 'text-blue-400');
-                document.getElementById('btn-tab-dashboard').classList.add('border-transparent', 'text-slate-400');
+                dashView.classList.add('hidden');
+                logsView.classList.remove('hidden');
+                logsBtn.className = "px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-full text-xs font-medium flex items-center gap-2 transition-all";
+                dashBtn.className = "px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-full text-xs font-medium border border-slate-700 flex items-center gap-2 transition-all";
                 loadLogs();
             }
             lucide.createIcons();
@@ -1037,21 +1061,26 @@ async def dashboard():
                 const container = document.getElementById('logs-container');
                 const isAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 50;
 
-                if (logs.length === 0) {
-                    container.innerHTML = '<div class="text-slate-500 italic">No logs available yet.</div>';
+                let filteredLogs = logs;
+                if (currentLogFilter !== 'ALL') {
+                    filteredLogs = logs.filter(log => log.level.trim() === currentLogFilter);
+                }
+
+                if (filteredLogs.length === 0) {
+                    container.innerHTML = `<div class="text-slate-500 italic">No ${currentLogFilter === 'ALL' ? '' : currentLogFilter} logs available yet.</div>`;
                     return;
                 }
 
-                container.innerHTML = logs.map(log => {
+                container.innerHTML = filteredLogs.map(log => {
                     let levelClass = 'text-slate-400';
-                    let msgClass = 'text-slate-300';
+                    let msgClass = 'text-slate-200';
                     const level = log.level.trim();
                     if (level === 'ERROR' || level === 'CRITICAL') { levelClass = 'text-red-500'; msgClass = 'text-red-400'; }
-                    else if (level === 'WARNING') { levelClass = 'text-yellow-500'; msgClass = 'text-yellow-300'; }
-                    else if (level === 'DEBUG') { levelClass = 'text-slate-600'; msgClass = 'text-slate-500'; }
+                    else if (level === 'WARNING') { levelClass = 'text-yellow-500'; msgClass = 'text-yellow-200'; }
+                    else if (level === 'DEBUG') { levelClass = 'text-slate-600'; msgClass = 'text-slate-400'; }
 
                     return `<div class="pb-0.5 leading-tight hover:bg-white/5 transition-colors">
-                        <span class="text-[9px] text-slate-500 font-mono opacity-50 select-none">${log.timestamp}</span>
+                        <span class="text-[9px] text-slate-400 font-mono select-none">${log.timestamp}</span>
                         <span class="text-[9px] font-bold px-1 ${levelClass} font-mono">${log.level}</span>
                         <span class="${msgClass} ml-1 whitespace-pre-wrap break-all">${escapeHtml(log.message)}</span>
                     </div>`;

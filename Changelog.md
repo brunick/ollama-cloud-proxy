@@ -2,19 +2,27 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
-## [1.20.9] - 2026-01-18
+## [1.20.10] - 2026-01-18
+### Fixed
+- 🎨 **Layout Fix**: Fehler in der HTML-Struktur behoben, durch den Dashboard-Inhalte beim Umschalten auf Logs teilweise sichtbar blieben oder den Logs-Tab überlagerten.
+- 🏷️ **Version Bump**: Konsolidierung aller Logging- und Stabilitäts-Fixes.
+
+## [1.20.10] - 2026-01-18
 ### Added
 - 💾 **Persistent Logging**: Alle Server-Logs werden nun zusätzlich in `data/proxy.log` gespeichert (#43).
 - 🛠️ **Full System Capture**: Umleitung von stdout/stderr in das Logging-System, um alle Prozessausgaben zu erfassen.
+- ⚙️ **Logging-Konfiguration**: Der Log-Level kann nun über die Umgebungsvariable `LOG_LEVEL` (DEBUG, INFO, WARNING, ERROR) in der `docker-compose.yml` gesteuert werden.
 
 ### Fixed
-- 📜 **Log Console Fix**: Fehler behoben, bei dem Logs im Dashboard nicht sichtbar waren.
-- 🎨 **Console Look**: Terminal-Optik für die Log-Anzeige mit Monospace-Schrift und verbessertem Kontrast.
+- 🎨 **Layout Fix**: Fehler in der HTML-Struktur behoben, durch den Dashboard-Inhalte beim Umschalten auf Logs teilweise sichtbar blieben oder den Logs-Tab überlagerten.
+- 🔍 **Log-Filter**: Neue Filter-Buttons (ALL, ERROR, WARN, INFO, DEBUG) im Logs-Tab hinzugefügt.
+- 📜 **Log Console Fix**: Sichtbarkeitsprobleme der Logs im Dashboard behoben.
+- 🎨 **Console Look**: Terminal-Optik für die Log-Anzeige mit Monospace-Schrift und helleren Zeitstempeln.
 - 🔄 **Live Updates**: Das Aktualisierungsintervall für Logs wurde auf 10 Sekunden verkürzt.
 - 🐛 **Startup Crash Fix**: Ein kritischer Fehler im Logging-System wurde behoben, der den Start des Servers verhinderte (`AttributeError: isatty`).
-- 🧹 **Log Clean-up**: Doppelte Log-Einträge im Docker-Log entfernt und Delegierung an den Original-Stream verbessert.
+- 🧹 **Log Clean-up**: Doppelte Log-Einträge im Docker-Log entfernt.
 
-*Hinweis: Version 1.20.8 wurde aufgrund eines kritischen Fehlers beim Start zurückgezogen.*
+*Hinweis: Versionen 1.20.8 und 1.20.9 wurden aufgrund kritischer Fehler in der Log-Struktur und beim Startup zurückgezogen.*
 
 ## [1.20.7] - 2026-01-18
 ### Added
