@@ -2,6 +2,11 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.20.4] - 2026-01-18
+### Added
+- 🔗 **Root Redirect**: Aufrufe der Root-URL (`/`) werden nun automatisch zum Dashboard weitergeleitet (#37).
+- 🚦 **System Health Indicator**: Das Dashboard zeigt nun den Echtzeit-Status des Proxys und der Ollama Cloud Verbindung an (#37).
+
 ## [1.20.3] - 2026-01-18
 ### Added
 - 🏷️ **Version Display**: Die aktuelle Version wird nun im Dashboard angezeigt und automatisch während des CI/CD-Prozesses aus dem Release-Tag generiert (#35).
