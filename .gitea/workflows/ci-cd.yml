@@ -55,6 +55,8 @@ jobs:
         with:
           context: .
           push: true
+          build-args: |
+            APP_VERSION=${{ gitea.event.release.tag_name }}
           tags: |
             git.n1c.lol/${{ gitea.repository }}:latest
             git.n1c.lol/${{ gitea.repository }}:${{ gitea.event.release.tag_name }}
