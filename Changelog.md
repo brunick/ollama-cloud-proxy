@@ -2,6 +2,11 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.20.9] - 2026-01-18
+### Fixed
+- 🐛 **Startup Crash Fix**: Ein kritischer Fehler im Logging-System wurde behoben, der den Start des Servers verhinderte (`AttributeError: isatty`).
+- 🧹 **Log Clean-up**: Doppelte Log-Einträge im Docker-Log entfernt und Delegierung an den Original-Stream verbessert.
+
 ## [1.20.8] - 2026-01-18
 ### Fixed
 - 📜 **Log Console Fix**: Fehler behoben, bei dem Logs im Dashboard nicht sichtbar waren.

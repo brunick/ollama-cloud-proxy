@@ -28,7 +28,7 @@ from fastapi.responses import (
 
 app = FastAPI()
 
-APP_VERSION = os.getenv("APP_VERSION", "v1.20.8")
+APP_VERSION = os.getenv("APP_VERSION", "v1.20.9")
 
 # Setup Logging
 LOG_FILE = "data/proxy.log"
@@ -42,12 +42,17 @@ class StreamToLogger:
         self.original_stream = original_stream
 
     def write(self, buf):
-        for line in buf.rstrip().splitlines():
-            self.logger.log(self.level, line.rstrip())
-        self.original_stream.write(buf)
+        # Only log if there is actual content
+        if buf.strip():
+            for line in buf.rstrip().splitlines():
+                self.logger.log(self.level, line.rstrip())
 
     def flush(self):
         self.original_stream.flush()
+
+    def __getattr__(self, name):
+        # Delegate attributes like isatty, fileno, encoding etc. to the original stream
+        return getattr(self.original_stream, name)
 
 
 class DashboardLogHandler(logging.Handler):
