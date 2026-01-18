@@ -8,11 +8,12 @@ Dieser Proxy leitet Anfragen an die offizielle Ollama Cloud API (`https://ollama
 
 - **🚀 Smart Load-Balancing**: Verteilt Anfragen automatisch auf verfügbare API-Keys basierend auf der geringsten Nutzung in den letzten 2 Stunden.
 - **🔄 Automatische Key-Rotation**: Erkennt `429 Too Many Requests` Fehler (Quota exceeded) und wiederholt den Request intern sofort mit einem anderen verfügbaren Key.
-- **📊 Echtzeit-Dashboard**: Integriertes Web-Interface zur Überwachung von Token-Verbrauch, Key-Status und Request-Logs.
+- **📊 Echtzeit-Dashboard**: Integriertes Web-Interface zur Überwachung von Token-Verbrauch, Key-Status (inkl. Key-Grouping) und Request-Logs.
 - **📈 Nutzungsstatistiken**:
   - Gesamt-Token-Counter (letzte 24h) mit stündlichem Sparkline-Graph.
-  - Detaillierter Token-Usage-Graph mit konfigurierbaren Zeitfenstern (60m, 2h, 4h, 6h, 12h, 24h).
+  - Detaillierter Token-Usage-Graph mit konfigurierbaren Zeitfenstern (10m, 60m, 2h, 4h, 6h, 12h, 24h).
   - Gestapelte Ansicht nach Modellen und Summenlinie.
+- **🚦 System Health Indicator**: Echtzeit-Statusanzeige für Proxy-Erreichbarkeit und Ollama Cloud Anbindung direkt im Dashboard.
 - **🛡️ Proxy Protection**: Optionaler `PROXY_AUTH_TOKEN`, um unbefugten Zugriff auf deinen Proxy zu verhindern.
 - **🌍 Timezone Support**: Alle Statistiken werden automatisch in der lokalen Zeitzone des Nutzers angezeigt (UTC-Backend).
 - **📝 Request Logging**: Speichert Request-Bodies (komprimiert) für Debugging-Zwecke (einsehbar im Dashboard).
@@ -47,7 +48,7 @@ Dieser Proxy leitet Anfragen an die offizielle Ollama Cloud API (`https://ollama
 
 ## Monitoring & Dashboard
 
-Das Dashboard ist standardmäßig unter `http://localhost:11434/dashboard` erreichbar.
+Das Dashboard ist standardmäßig unter `http://localhost:11434/dashboard` erreichbar. Aufrufe der Root-URL (`/`) werden automatisch zum Dashboard weitergeleitet.
 
 ### Key Features im Dashboard:
 - **Key Status**: Live-Status jedes Keys inklusive aktueller Penalty-Box Informationen (bei Rate-Limits).
@@ -58,7 +59,9 @@ Das Dashboard ist standardmäßig unter `http://localhost:11434/dashboard` errei
 ## API Endpunkte
 
 - `/{path:path}`: Transparentes Proxying zur Ollama Cloud.
+- `/`: Redirect zum Dashboard.
 - `/dashboard`: Web-Interface.
+- `/health`: JSON-Status der Proxy-Gesundheit und Cloud-Konnektivität.
 - `/stats`: Stündlich aggregierte Statistiken (JSON).
 - `/stats/minute`: Minütliche Statistiken für Charts (JSON).
 - `/stats/24h`: Zusammenfassung der letzten 24 Stunden.
