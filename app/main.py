@@ -7,6 +7,7 @@ import json
 import logging
 import logging.handlers
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -28,7 +29,7 @@ from fastapi.responses import (
 
 app = FastAPI()
 
-APP_VERSION = os.getenv("APP_VERSION", "v1.20.10")
+APP_VERSION = os.getenv("APP_VERSION", "v1.20.11")
 
 # Setup Logging
 LOG_FILE = "data/proxy.log"
@@ -1579,11 +1580,15 @@ async def _handle_proxy(
         # After stream finishes, try to extract stats from the accumulated tail
         try:
             # Ollama sends newline-delimited JSON or a single JSON object.
-            # We look for the last complete JSON object in the tail.
             decoded_tail = tail_buffer.decode(errors="ignore").strip()
             lines = decoded_tail.split("\n")
 
-            # Iterate backwards to find the last valid JSON with stats
+            found_stats = False
+            model_name = "unknown"
+            prompt_tokens = 0
+            completion_tokens = 0
+
+            # 1. Try to find the last valid JSON object (works for streaming and small non-streaming)
             for line in reversed(lines):
                 line = line.strip()
                 if not line or not (line.startswith("{") and line.endswith("}")):
@@ -1591,32 +1596,47 @@ async def _handle_proxy(
 
                 try:
                     data = json.loads(line)
-                    # For both streaming (done=True) and non-streaming responses
                     if data.get("done") or "eval_count" in data:
                         model_name = data.get("model", "unknown")
                         prompt_tokens = data.get("prompt_eval_count", 0)
                         completion_tokens = data.get("eval_count", 0)
-
-                        # Record usage in existing table
-                        record_usage(
-                            c_ip,
-                            k_index,
-                            model_name,
-                            prompt_tokens,
-                            completion_tokens,
-                        )
-
-                        # Update existing request metadata
-                        if request_id is not None:
-                            update_request_log(
-                                request_id=request_id,
-                                model=model_name,
-                                prompt_tokens=prompt_tokens,
-                                completion_tokens=completion_tokens,
-                            )
+                        found_stats = True
                         break
                 except json.JSONDecodeError:
                     continue
+
+            # 2. Regex fallback (works for large or pretty-printed non-streaming responses)
+            if not found_stats:
+                prompt_match = re.findall(
+                    r'"prompt_eval_count"\s*:\s*(\d+)', decoded_tail
+                )
+                eval_match = re.findall(r'"eval_count"\s*:\s*(\d+)', decoded_tail)
+                model_match = re.findall(r'"model"\s*:\s*"([^"]+)"', decoded_tail)
+
+                if prompt_match and eval_match:
+                    prompt_tokens = int(prompt_match[-1])
+                    completion_tokens = int(eval_match[-1])
+                    model_name = model_match[-1] if model_match else "unknown"
+                    found_stats = True
+
+            if found_stats:
+                # Record usage in existing table
+                record_usage(
+                    c_ip,
+                    k_index,
+                    model_name,
+                    prompt_tokens,
+                    completion_tokens,
+                )
+
+                # Update existing request metadata
+                if request_id is not None:
+                    update_request_log(
+                        request_id=request_id,
+                        model=model_name,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                    )
         except Exception as e:
             print(f"DEBUG [Stream Error]: {e}")
             traceback.print_exc()
