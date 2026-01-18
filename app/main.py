@@ -24,14 +24,15 @@ from fastapi.responses import (
 
 app = FastAPI()
 
-APP_VERSION = os.getenv("APP_VERSION", "v1.20.4")
+APP_VERSION = os.getenv("APP_VERSION", "v1.20.5")
 
 # Store latest rate limit headers per key index
 rate_limit_store = {}
-# Penalty box for keys that returned 429: {key_index: expiration_timestamp}
+# Penalty box for keys that returned 429/50x: {key_index: expiration_timestamp}
 key_penalty_box: Dict[int, float] = {}
 # Track backoff levels for keys: {key_index: level_index}
 key_backoff_levels: Dict[int, int] = {}
+key_backoff_levels_50x: Dict[int, int] = {}
 # Global cache for key health results
 cached_health_results: Dict[str, dict] = {}
 last_health_check_timestamp: float = 0
@@ -44,6 +45,15 @@ BACKOFF_STAGES = [
     6 * 60 * 60,  # 6 hours
     12 * 60 * 60,  # 12 hours
     24 * 60 * 60,  # 24 hours
+]
+
+# Backoff stages for 50x errors: 30s, 2m, 5m, 15m, 1h
+BACKOFF_STAGES_50X = [
+    30,  # 30 sec
+    120,  # 2 min
+    300,  # 5 min (user's requested max for initial repeat)
+    900,  # 15 min
+    3600,  # 1 hour
 ]
 
 # Persistent HTTP client for streaming stability
@@ -398,30 +408,55 @@ async def reset_key_penalty(
         del key_penalty_box[key_index]
     if key_index in key_backoff_levels:
         del key_backoff_levels[key_index]
+    if key_index in key_backoff_levels_50x:
+        del key_backoff_levels_50x[key_index]
 
     # Perform immediate health check for this specific key
     key = OLLAMA_API_KEYS[key_index]
     now = time.time()
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
-            response = await client.get(
-                f"{OLLAMA_CLOUD_URL}/v1/models",
+            # Use generation test for consistency with background worker
+            payload = {"model": "gemma3:4b-cloud", "prompt": "test", "stream": False}
+            response = await client.post(
+                f"{OLLAMA_CLOUD_URL}/api/generate",
                 headers={"Authorization": f"Bearer {key}"},
+                json=payload,
             )
+
+            status_text = f"❌ ERROR {response.status_code}"
             if response.status_code == 200:
-                return {"status": "✅ OK", "key_index": key_index}
+                status_text = "✅ OK"
             elif response.status_code == 429:
-                # Put back in penalty box if still rate limited
+                status_text = "🚫 STILL RATE LIMITED"
                 key_penalty_box[key_index] = now + BACKOFF_STAGES[0]
                 key_backoff_levels[key_index] = 0
-                return {"status": "🚫 STILL RATE LIMITED", "key_index": key_index}
-            else:
-                return {
-                    "status": f"❌ ERROR {response.status_code}",
-                    "key_index": key_index,
-                }
+
+            # Immediately update cache
+            cached_health_results[f"key_{key_index}"] = {
+                "status": status_text,
+                "penalty_active": key_index in key_penalty_box
+                and key_penalty_box[key_index] > now,
+                "expires_in": int(key_penalty_box[key_index] - now)
+                if key_index in key_penalty_box
+                else 0,
+                "backoff_level": key_backoff_levels.get(key_index, 0),
+                "usage_2h": cached_health_results.get(f"key_{key_index}", {}).get(
+                    "usage_2h", 0
+                ),
+            }
+
+            return {"status": status_text, "key_index": key_index}
         except Exception as e:
-            return {"status": "📡 OFFLINE", "error": str(e), "key_index": key_index}
+            status_text = "📡 OFFLINE"
+            cached_health_results[f"key_{key_index}"] = {
+                "status": status_text,
+                "penalty_active": False,
+                "expires_in": 0,
+                "backoff_level": 0,
+                "usage_2h": 0,
+            }
+            return {"status": status_text, "error": str(e), "key_index": key_index}
 
 
 @app.post("/health/keys/{key_index}/penalize")
@@ -437,12 +472,24 @@ async def penalize_key_manually(
     # Set to first backoff level (15 min) or keep existing if higher
     current_level = key_backoff_levels.get(key_index, 0)
     key_backoff_levels[key_index] = current_level
-    key_penalty_box[key_index] = time.time() + BACKOFF_STAGES[current_level]
+    expires_in = BACKOFF_STAGES[current_level]
+    key_penalty_box[key_index] = time.time() + expires_in
+
+    # Update cache
+    cached_health_results[f"key_{key_index}"] = {
+        "status": "⏳ PENALIZED",
+        "penalty_active": True,
+        "expires_in": expires_in,
+        "backoff_level": current_level,
+        "usage_2h": cached_health_results.get(f"key_{key_index}", {}).get(
+            "usage_2h", 0
+        ),
+    }
 
     return {
         "status": "penalized_manually",
         "key_index": key_index,
-        "expires_in": BACKOFF_STAGES[current_level],
+        "expires_in": expires_in,
     }
 
 
@@ -488,6 +535,8 @@ async def perform_keys_health_check(force_all: bool = False):
                     del key_penalty_box[i]
                 if i in key_backoff_levels:
                     del key_backoff_levels[i]
+                if i in key_backoff_levels_50x:
+                    del key_backoff_levels_50x[i]
             elif response.status_code == 429:
                 status = "🚫 RATE LIMITED"
                 current_level = key_backoff_levels.get(i, -1) + 1
@@ -1408,10 +1457,16 @@ async def _handle_proxy(
             # If server error (500, 502, 503, 504), penalize briefly and retry
             elif response.status_code in [500, 502, 503, 504]:
                 now = time.time()
-                # Penalize for 30 seconds to let the upstream stabilize
-                key_penalty_box[current_key_index] = now + 30
+                # Progressive backoff for 50x errors
+                current_level = key_backoff_levels_50x.get(current_key_index, -1) + 1
+                level = min(current_level, len(BACKOFF_STAGES_50X) - 1)
+                key_backoff_levels_50x[current_key_index] = level
+
+                reset_after = BACKOFF_STAGES_50X[level]
+                key_penalty_box[current_key_index] = now + reset_after
+
                 print(
-                    f"Key {current_key_index} (attempt {attempt + 1}) encountered upstream error ({response.status_code}). Penalized for 30s."
+                    f"Key {current_key_index} (attempt {attempt + 1}) encountered upstream error ({response.status_code}). Level {level}, Penalized for {reset_after}s."
                 )
                 if attempt < len(OLLAMA_API_KEYS) - 1:
                     print(
