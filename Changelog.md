@@ -2,6 +2,10 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.20.6] - 2026-01-18
+### Added
+- 📈 **10min View**: Der Token-Usage-Graph unterstützt nun eine detaillierte 10-Minuten-Ansicht für eine präzisere Überwachung der aktuellen Nutzung (#34).
+
 ## [1.20.5] - 2026-01-18
 ### Fixed
 - 🔄 **Cache-Synchronisierung**: Das manuelle Zurücksetzen oder Bestrafen von Keys aktualisiert nun sofort den Dashboard-Cache für eine direkte Rückmeldung.

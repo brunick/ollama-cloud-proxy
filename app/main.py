@@ -24,7 +24,7 @@ from fastapi.responses import (
 
 app = FastAPI()
 
-APP_VERSION = os.getenv("APP_VERSION", "v1.20.5")
+APP_VERSION = os.getenv("APP_VERSION", "v1.20.6")
 
 # Store latest rate limit headers per key index
 rate_limit_store = {}
@@ -803,6 +803,7 @@ async def dashboard():
                     <i data-lucide="line-chart"></i> Token Usage
                 </h2>
                 <div class="flex items-center gap-2 bg-slate-800 p-1 rounded-lg border border-slate-700">
+                    <button onclick="setTimeRange(10)" id="btn-10" class="time-range-btn px-3 py-1 rounded-md text-xs font-medium transition text-slate-400 hover:text-white">10m</button>
                     <button onclick="setTimeRange(60)" id="btn-60" class="time-range-btn px-3 py-1 rounded-md text-xs font-medium transition bg-blue-600 text-white">60m</button>
                     <button onclick="setTimeRange(120)" id="btn-120" class="time-range-btn px-3 py-1 rounded-md text-xs font-medium transition text-slate-400 hover:text-white">2h</button>
                     <button onclick="setTimeRange(240)" id="btn-240" class="time-range-btn px-3 py-1 rounded-md text-xs font-medium transition text-slate-400 hover:text-white">4h</button>
@@ -1081,7 +1082,7 @@ async def dashboard():
                 // For display labels in local time
                 const timeStrDisplay = d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0');
 
-                const labelFreq = currentTimeRange <= 120 ? 10 : (currentTimeRange <= 360 ? 30 : 60);
+                const labelFreq = currentTimeRange <= 10 ? 2 : (currentTimeRange <= 120 ? 10 : (currentTimeRange <= 360 ? 30 : 60));
                 if (i % labelFreq === 0 || i === currentTimeRange - 1 || i === 0) {
                     labels.push(timeStrDisplay);
                 } else {
