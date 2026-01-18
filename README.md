@@ -9,6 +9,7 @@ Dieser Proxy leitet Anfragen an die offizielle Ollama Cloud API (`https://ollama
 - **🚀 Smart Load-Balancing**: Verteilt Anfragen automatisch auf verfügbare API-Keys basierend auf der geringsten Nutzung in den letzten 2 Stunden.
 - **🔄 Automatische Key-Rotation**: Erkennt `429 Too Many Requests` Fehler (Quota exceeded) und wiederholt den Request intern sofort mit einem anderen verfügbaren Key.
 - **📊 Echtzeit-Dashboard**: Integriertes Web-Interface zur Überwachung von Token-Verbrauch, Key-Status (inkl. Key-Grouping) und Request-Logs.
+- **📜 Live Server Logs**: Integrierter Log-Viewer im Dashboard mit Filterfunktion (DEBUG, INFO, WARN, ERROR) für Echtzeit-Einblicke in den Proxy-Status.
 - **📈 Nutzungsstatistiken**:
   - Gesamt-Token-Counter (letzte 24h) mit stündlichem Sparkline-Graph.
   - Detaillierter Token-Usage-Graph mit konfigurierbaren Zeitfenstern (10m, 60m, 2h, 4h, 6h, 12h, 24h).
@@ -17,6 +18,7 @@ Dieser Proxy leitet Anfragen an die offizielle Ollama Cloud API (`https://ollama
 - **🛡️ Proxy Protection**: Optionaler `PROXY_AUTH_TOKEN`, um unbefugten Zugriff auf deinen Proxy zu verhindern.
 - **🌍 Timezone Support**: Alle Statistiken werden automatisch in der lokalen Zeitzone des Nutzers angezeigt (UTC-Backend).
 - **📝 Request Logging**: Speichert Request-Bodies (komprimiert) für Debugging-Zwecke (einsehbar im Dashboard).
+- **💾 Persistent Logging**: Alle Server-Ausgaben werden rotierend in `data/proxy.log` gespeichert (max. 5MB, 5 Backups).
 
 ## Setup
 
@@ -37,6 +39,7 @@ Dieser Proxy leitet Anfragen an die offizielle Ollama Cloud API (`https://ollama
    ```env
    PROXY_AUTH_TOKEN=ein_geheimes_passwort_fuer_lokal
    ALLOW_UNAUTHENTICATED_ACCESS=false # Wenn true, wird kein Token benötigt
+   LOG_LEVEL=INFO # DEBUG, INFO, WARNING, ERROR
    ```
 
    *Hinweis: Die Umgebungsvariable `OLLAMA_API_KEYS` wird nicht mehr unterstützt. Bitte nutze ausschließlich die `config.yaml`.*
@@ -52,6 +55,7 @@ Das Dashboard ist standardmäßig unter `http://localhost:11434/dashboard` errei
 
 ### Key Features im Dashboard:
 - **Key Status**: Live-Status jedes Keys inklusive aktueller Penalty-Box Informationen (bei Rate-Limits).
+- **Server Logs**: Separater Tab mit Live-Streaming der Container-Logs, inklusive Level-Filter und "Clear View" Funktion.
 - **Token Counter**: Schnellübersicht der letzten 24h inklusive Trend-Analyse.
 - **Recent Queries**: Live-Ansicht der letzten Anfragen mit der Möglichkeit, den Request-Body einzusehen.
 - **Aggregated Stats**: Stündlich aggregierte Daten nach Modell und IP-Adresse.
@@ -66,6 +70,7 @@ Das Dashboard ist standardmäßig unter `http://localhost:11434/dashboard` errei
 - `/stats/minute`: Minütliche Statistiken für Charts (JSON).
 - `/stats/24h`: Zusammenfassung der letzten 24 Stunden.
 - `/health/keys`: Detaillierter Gesundheitszustand aller API-Keys.
+- `/logs`: JSON-Endpunkt für die aktuell im Speicher gehaltenen Logs.
 
 ## Nutzung
 
