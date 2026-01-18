@@ -2,6 +2,16 @@
 
 Alle wichtigen Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
+## [1.20.8] - 2026-01-18
+### Fixed
+- 📜 **Log Console Fix**: Fehler behoben, bei dem Logs im Dashboard nicht sichtbar waren.
+- 🎨 **Console Look**: Terminal-Optik für die Log-Anzeige mit Monospace-Schrift und verbessertem Kontrast.
+- 🔄 **Live Updates**: Das Aktualisierungsintervall für Logs wurde auf 10 Sekunden verkürzt.
+
+### Added
+- 💾 **Persistent Logging**: Alle Server-Logs werden nun zusätzlich in `data/proxy.log` gespeichert (#43).
+- 🛠️ **Full System Capture**: Umleitung von stdout/stderr in das Logging-System, um alle Prozessausgaben zu erfassen.
+
 ## [1.20.7] - 2026-01-18
 ### Added
 - 📜 **Server Logs Tab**: Neues Tab im Dashboard zur Anzeige von Live-Server-Logs und Debug-Ausgaben direkt im Browser (#43).
