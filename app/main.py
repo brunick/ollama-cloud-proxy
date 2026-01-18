@@ -19,6 +19,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 app = FastAPI()
 
+APP_VERSION = os.getenv("APP_VERSION", "v1.20.3")
+
 # Store latest rate limit headers per key index
 rate_limit_store = {}
 # Penalty box for keys that returned 429: {key_index: expiration_timestamp}
@@ -681,7 +683,10 @@ async def dashboard():
                     <i data-lucide="bar-chart-3" class="text-blue-400"></i>
                     Ollama Proxy Dashboard
                 </h1>
-                <p class="text-slate-400">Monitoring and Usage Statistics</p>
+                <p class="text-slate-400 flex items-center gap-2">
+                    Monitoring and Usage Statistics
+                    <span class="px-2 py-0.5 bg-slate-800 text-slate-500 rounded text-[10px] font-mono border border-slate-700">{APP_VERSION}</span>
+                </p>
             </div>
             <div class="flex gap-4">
                 <button onclick="loadStats(true)" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg flex items-center gap-2 transition">
@@ -1171,7 +1176,7 @@ async def dashboard():
 </body>
 </html>
     """
-    return HTMLResponse(content=html_content)
+    return HTMLResponse(content=html_content.replace("{APP_VERSION}", APP_VERSION))
 
 
 @app.get("/ratelimits")

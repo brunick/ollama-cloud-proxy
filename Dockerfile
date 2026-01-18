@@ -15,6 +15,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ .
 
 # Set environment variables
+ARG APP_VERSION=v1.20.3
+ENV APP_VERSION=${APP_VERSION}
 ENV OLLAMA_HOST=0.0.0.0
 ENV PORT=11434
 
