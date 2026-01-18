@@ -5,6 +5,7 @@ import asyncio
 import gzip
 import json
 import logging
+import logging.handlers
 import os
 import sqlite3
 import sys
@@ -27,12 +28,30 @@ from fastapi.responses import (
 
 app = FastAPI()
 
-APP_VERSION = os.getenv("APP_VERSION", "v1.20.7")
+APP_VERSION = os.getenv("APP_VERSION", "v1.20.8")
+
+# Setup Logging
+LOG_FILE = "data/proxy.log"
+os.makedirs("data", exist_ok=True)
 
 
-# Dashboard Log Handler
+class StreamToLogger:
+    def __init__(self, logger_name, level, original_stream):
+        self.logger = logging.getLogger(logger_name)
+        self.level = level
+        self.original_stream = original_stream
+
+    def write(self, buf):
+        for line in buf.rstrip().splitlines():
+            self.logger.log(self.level, line.rstrip())
+        self.original_stream.write(buf)
+
+    def flush(self):
+        self.original_stream.flush()
+
+
 class DashboardLogHandler(logging.Handler):
-    def __init__(self, capacity=500):
+    def __init__(self, capacity=1000):
         super().__init__()
         self.logs = deque(maxlen=capacity)
 
@@ -41,8 +60,8 @@ class DashboardLogHandler(logging.Handler):
             msg = self.format(record)
             self.logs.append(
                 {
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "level": record.levelname,
+                    "timestamp": datetime.now().strftime("%H:%M:%S"),
+                    "level": record.levelname.ljust(5),
                     "message": msg,
                 }
             )
@@ -52,28 +71,43 @@ class DashboardLogHandler(logging.Handler):
 
 dashboard_log_handler = DashboardLogHandler()
 dashboard_log_handler.setFormatter(logging.Formatter("%(message)s"))
-logger = logging.getLogger("app")
-logger.setLevel(logging.DEBUG)
-logger.addHandler(dashboard_log_handler)
 
-# Capture uvicorn logs too
-logging.getLogger("uvicorn.access").addHandler(dashboard_log_handler)
-logging.getLogger("uvicorn.error").addHandler(dashboard_log_handler)
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+root_logger.addHandler(dashboard_log_handler)
 
-# Also ensure logs go to stdout for docker logs
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setFormatter(
+file_handler = logging.handlers.RotatingFileHandler(
+    LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=5
+)
+file_handler.setFormatter(
     logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 )
-logger.addHandler(console_handler)
+root_logger.addHandler(file_handler)
 
-# Redirect standard print to our logger for convenience
+original_stdout = sys.stdout
+original_stderr = sys.stderr
+
+console_handler = logging.StreamHandler(original_stdout)
+console_handler.setFormatter(
+    logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+)
+root_logger.addHandler(console_handler)
+
+sys.stdout = StreamToLogger("sys.stdout", logging.INFO, original_stdout)
+sys.stderr = StreamToLogger("sys.stderr", logging.ERROR, original_stderr)
+
+# Uvicorn Setup
+for u_name in ["uvicorn", "uvicorn.access", "uvicorn.error"]:
+    u_log = logging.getLogger(u_name)
+    u_log.handlers = []
+    u_log.propagate = True
+
 _builtin_print = print
 
 
 def print(*args, **kwargs):
     msg = " ".join(str(arg) for arg in args)
-    logger.info(msg)
+    logging.info(msg)
 
 
 # Store latest rate limit headers per key index
@@ -789,6 +823,7 @@ async def dashboard():
     <style>
         body { background-color: #0f172a; color: #f8fafc; }
         .card { background-color: #1e293b; border: 1px solid #334155; }
+        #logs-container { background-color: #020617; border: 1px solid #1e293b; }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
@@ -956,7 +991,7 @@ async def dashboard():
                         </button>
                     </div>
                 </div>
-                <div id="logs-container" class="bg-slate-900 rounded-lg p-4 font-mono text-[11px] overflow-auto flex-1 space-y-1 scrollbar-hide">
+                <div id="logs-container" class="rounded-lg p-4 font-mono text-[11px] overflow-auto flex-1 scrollbar-hide">
                     <div class="text-slate-500 italic">Waiting for logs...</div>
                 </div>
             </div>
@@ -1003,15 +1038,17 @@ async def dashboard():
                 }
 
                 container.innerHTML = logs.map(log => {
-                    let colorClass = 'text-slate-300';
-                    if (log.level === 'ERROR' || log.level === 'CRITICAL') colorClass = 'text-red-400';
-                    else if (log.level === 'WARNING') colorClass = 'text-yellow-400';
-                    else if (log.level === 'DEBUG') colorClass = 'text-slate-500';
+                    let levelClass = 'text-slate-400';
+                    let msgClass = 'text-slate-300';
+                    const level = log.level.trim();
+                    if (level === 'ERROR' || level === 'CRITICAL') { levelClass = 'text-red-500'; msgClass = 'text-red-400'; }
+                    else if (level === 'WARNING') { levelClass = 'text-yellow-500'; msgClass = 'text-yellow-300'; }
+                    else if (level === 'DEBUG') { levelClass = 'text-slate-600'; msgClass = 'text-slate-500'; }
 
-                    return `<div class="border-b border-slate-800/30 pb-1 last:border-0 leading-relaxed">
-                        <span class="text-[9px] text-slate-500 font-mono opacity-70">[${log.timestamp}]</span>
-                        <span class="text-[9px] font-bold px-1 rounded ${log.level === 'ERROR' ? 'bg-red-900/30 text-red-400' : (log.level === 'WARNING' ? 'bg-yellow-900/30 text-yellow-400' : 'bg-slate-800 text-slate-400')}">${log.level}</span>
-                        <span class="${colorClass} ml-2 whitespace-pre-wrap">${escapeHtml(log.message)}</span>
+                    return `<div class="pb-0.5 leading-tight hover:bg-white/5 transition-colors">
+                        <span class="text-[9px] text-slate-500 font-mono opacity-50 select-none">${log.timestamp}</span>
+                        <span class="text-[9px] font-bold px-1 ${levelClass} font-mono">${log.level}</span>
+                        <span class="${msgClass} ml-1 whitespace-pre-wrap break-all">${escapeHtml(log.message)}</span>
                     </div>`;
                 }).join('');
 
@@ -1417,11 +1454,11 @@ async def dashboard():
         }
 
         loadStats();
-        // Refresh every 30 seconds
+        // Refresh every 10 seconds
         setInterval(() => {
             loadStats();
             if (currentTab === 'logs') loadLogs();
-        }, 30000);
+        }, 10000);
     </script>
 </body>
 </html>
